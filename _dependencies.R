@@ -5,4 +5,7 @@ library(RPostgres)
 library(sf)
 library(dbplyr)
 library(shiny.telemetry)
+library(leaflet)
+library(writexl)
+library(stringr)
 # ... lägg till fler paket vid behov

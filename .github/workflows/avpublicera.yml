@@ -63,3 +63,5 @@ jobs:
       - name: Synka app-lista mot databasen
         run: |
           sudo -u shiny /usr/local/bin/synka_app_lista.sh || echo "Varning: kunde inte synka app-listan (ej kritiskt fel)"
+
+# (touch för workflow-registrering)

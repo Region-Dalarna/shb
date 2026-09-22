@@ -1,0 +1,16 @@
+# _publicering_till_server.yml
+#
+# Styr vilken Shiny-server som appen publiceras till när
+# shinyapp_publicera() körs utan target-parameter.
+#
+# Giltiga värden för target:
+#   publik   - publicera till den publika Shiny-servern
+#   intern   - publicera till den interna Shiny-servern
+#
+# För engångs-override utan att ändra appens hemvist:
+#   shinyapp_publicera("appnamn", target = "intern")
+#
+# För att permanent flytta appen till andra servern:
+#   shinyapp_flytta("appnamn")
+
+target: publik

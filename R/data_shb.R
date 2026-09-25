@@ -19,10 +19,6 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
   omr %>%
     select(omradesnamn = all_of(kol$namn), kommunkod = all_of(kol$kommunkod), all_of(kol$geom)) %>%
     collect() %>%                                                  # först här görs uttaget ur databasen
-    # RPostgres levererar geometrin med klassen pq_geometry, och sf:s metod för den klassen
-    # har ett stavfel (spatiallite) som ger "object(s) should be of class 'sfg'".
-    # Som WKB går den direkt till sf:s vanliga EWKB-tolkning.
-    mutate(across(all_of(kol$geom), ~ structure(unclass(.x), class = "WKB"))) %>%
     df_till_sf(geom_col = kol$geom) %>%                            # tabellen ligger i SWEREF99 TM (3006)
     st_transform(crs = 4326) %>%
     mutate(kommunkod = str_pad(as.character(kommunkod), 4, pad = "0"),

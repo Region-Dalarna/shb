@@ -10,7 +10,7 @@ library(dplyr)
 library(tidyr)
 library(readr)
 library(ggplot2)
-source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R", encoding = "utf-8", echo = FALSE)
+library(rdshinyappar)
 
 telemetry <- skapa_telemetry("shb")
 

@@ -40,7 +40,7 @@ shb_kol <- list(
 shb_stat_tabell <- NULL
 
 # Källrad längst ner i diagrammen, skrivs ut precis som den står här
-KALLA_SHB <- "Källa: ..., bearbetning av Samhällsanalys, Region Dalarna"
+KALLA_SHB <- "Källa: Dalarnas mikrodatabas (SCB), bearbetning av Samhällsanalys, Region Dalarna"
 
 # ---- 2. Läs in kartor ----
 

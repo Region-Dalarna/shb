@@ -116,9 +116,11 @@
 
 /* ---- Layout för Statistik-fliken ---- */
 .karta-layout #karta_shb { height: 70vh !important; }
+/* Diagramcellerna delar på kartans höjd, så att nedre diagrammet slutar i
+   linje med kartan: 70vh minus verktygsraden (62px) och luften mellan raderna (12px) */
 .karta-layout .diagram-cell {
-  height: 35vh;
-  min-height: 240px;
+  height: calc((70vh - 74px) / 2);
+  min-height: 220px;
 }
 /* Karta lite smalare så diagrammen får mer plats */
 @media (min-width: 992px) {
@@ -131,9 +133,9 @@
     max-width: 72%;
   }
 }
-/* Vertikal luft mellan de staplade diagrammen */
-.karta-layout .diagram-cell + .diagram-cell {
-  margin-top: 18px;
+/* Vertikal luft mellan diagramraderna */
+.karta-layout .col-sm-8 > .row + .row {
+  margin-top: 12px;
 }
 .karta-layout .diagram-cell .girafe_container_std,
 .karta-layout .diagram-cell .html-widget {
@@ -141,7 +143,8 @@
   width: 100% !important;
 }
 /* Tightare gutters mellan kolumnerna */
-.karta-layout .col-sm-6 {
+.karta-layout .col-sm-6,
+.karta-layout .col-sm-8 .col-sm-12 {
   padding-left: 4px !important;
   padding-right: 4px !important;
 }
@@ -205,7 +208,6 @@
 /* ---- Reservera plats längst ner i klickbara diagramceller åt badgen ----
    Krymper bara ggiraph-widgetens höjd med 22px, oavsett box-sizing,
    så badgen aldrig hamnar ovanpå x-axelns roterade etiketter. */
-.karta-layout .diagram-cell--klickbar .girafe_container_std,
 .karta-layout .diagram-cell--klickbar .html-widget {
   height: calc(100% - 22px) !important;
 }

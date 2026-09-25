@@ -16,11 +16,13 @@ tema_diagram <- function() {
     )
 }
 
-skapa_girafe <- function(p, klickbar = FALSE) {
+# width/height i tum. Använd diagram_storlek() så att diagrammet får samma proportioner
+# som sin cell, annars krymps det och hamnar mitt i cellen med tomrum runt
+skapa_girafe <- function(p, klickbar = FALSE, width = 8, height = 3.9) {
   girafe(
     ggobj = p,
-    width_svg = 10,
-    height_svg = 4,
+    width_svg = width,
+    height_svg = height,
     bg = "transparent",
     options = list(
       opts_sizing(rescale = TRUE, width = 1),
@@ -29,6 +31,19 @@ skapa_girafe <- function(p, klickbar = FALSE) {
       opts_toolbar(saveaspng = TRUE, pngname = "diagram")
     )
   )
+}
+
+# Diagrammets storlek i tum utifrån hur stor output-cellen är i webbläsaren.
+# 80 px per tum ger lagom textstorlek (färre px per tum = mindre text i förhållande till diagrammet). Shiny ritar om diagrammet när fönstret ändrar storlek.
+# tecken = ungefär hur många tecken av rubriken som får plats på en rad.
+diagram_storlek <- function(session, output_id, px_per_tum = 80) {
+  bredd <- session$clientData[[paste0("output_", output_id, "_width")]]
+  hojd  <- session$clientData[[paste0("output_", output_id, "_height")]]
+  if (is.null(bredd) || is.null(hojd) || bredd == 0 || hojd == 0) {
+    bredd <- 900
+    hojd  <- 450
+  }
+  list(width = max(bredd, 300) / px_per_tum, height = max(hojd, 150) / px_per_tum, tecken = floor(bredd / 7.5))
 }
 
 # ---- Formatering av tal ----

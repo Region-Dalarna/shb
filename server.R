@@ -1,10 +1,15 @@
 KALLA_TEXT <- if (shb_exempeldata) "Exempeldata – slumpade värden, inte riktig statistik" else KALLA_SHB
 
-# Färgskala för kartan
-kartfarger <- c("#eef7f5", rus_tre_fokus[1], rus_tre_fokus[2])
-farg_stapel <- rus_tre_fokus[2]
-farg_riket  <- "#999999"
-farg_vald   <- "#000000"
+# Färger som i brott-appen
+kartpalett       <- "YlOrRd"
+farg_stapel      <- "#3182bd"
+farg_vald        <- "#e31a1c"      # valt område i diagrammen
+farg_vald_fyll   <- "#f15060"      # valt område i kartan
+farg_vald_kant   <- "#ae2d3a"
+farg_nedtonad    <- "#c6d4e1"      # områden utanför vald kommun
+farg_kommun      <- "#0f7090"
+farg_lan         <- "#54a1bd"
+farg_riket       <- "#8edded"
 
 shinyServer(function(input, output, session) {
   rdshinyappar::telemetri_server(telemetry, navigation_id = 'flikval', forsta_flik = 'Statistik')
@@ -33,10 +38,6 @@ shinyServer(function(input, output, session) {
     indikatorenhet(shb_statistik, input$val_indikator)
   })
   enhet_text <- reactive(if (enhet() == "procent") "Andel (%)" else "Antal")
-
-  geografi_text <- reactive({
-    if (kartniva() == "kommun") "i Dalarnas kommuner" else paste0("i ", vald_kommun_namn())
-  })
 
   # ---- Data för kartan och geografidiagrammet ----
   # sf-objekt med kolumnerna kod, namn och varde för den geografi som visas
@@ -124,7 +125,7 @@ shinyServer(function(input, output, session) {
       return()
     }
 
-    pal <- colorNumeric(kartfarger, domain = df_map$varde, na.color = "#dddddd")
+    pal <- colorNumeric(kartpalett, domain = df_map$varde, na.color = "transparent")
 
     etiketter <- lapply(paste0(
       df_map$namn, "<br>",
@@ -136,9 +137,9 @@ shinyServer(function(input, output, session) {
     proxy %>%
       addPolygons(
         layerId     = ~kod,
-        fillColor   = ~pal(varde),
-        fillOpacity = ~ifelse(vald_geom, 0.95, 0.7),
-        color       = ~ifelse(vald_geom, farg_vald, "#555555"),
+        fillColor   = ~ifelse(vald_geom, farg_vald_fyll, pal(varde)),
+        fillOpacity = ~ifelse(vald_geom, 0.95, 0.6),
+        color       = ~ifelse(vald_geom, farg_vald_kant, "#555555"),
         weight      = ~ifelse(vald_geom, 3, 0.7),
         label       = etiketter,
         highlightOptions = highlightOptions(weight = 3, color = "#000000", bringToFront = FALSE)
@@ -188,19 +189,24 @@ shinyServer(function(input, output, session) {
 
     validate(need(nrow(df_diag) > 0, "Inga data för valt urval"))
 
-    titel <- paste0(input$val_indikator, " per ", if (kartniva() == "kommun") "kommun" else "område", " ",
-                    geografi_text(), " år ", input$val_ar)
+    titel <- if (kartniva() == "kommun") {
+      paste0(input$val_indikator, " per kommun år ", input$val_ar)
+    } else {
+      paste0(input$val_indikator, " per område i ", vald_kommun_namn(), " år ", input$val_ar)
+    }
+    storlek <- diagram_storlek(session, "diagram_geografi")
 
     p <- ggplot(df_diag, aes(x = reorder(namn, varde), y = varde)) +
       geom_col_interactive(aes(tooltip = etikett, data_id = kod, fill = farg), color = NA) +
       scale_fill_identity() +
       scale_y_continuous(labels = formatera_tal) +
       scale_x_discrete(labels = function(x) str_trunc(x, 20)) +
-      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, 90), caption = KALLA_TEXT) +
+      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, storlek$tecken), caption = KALLA_TEXT) +
       tema_diagram() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = if (nrow(df_diag) > 30) 7 else diagram_axeltext_storlek),
+            legend.position = "none")
 
-    skapa_girafe(p, klickbar = TRUE)
+    skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
   })
 
   output$geografi_klick_text <- renderText({
@@ -208,9 +214,9 @@ shinyServer(function(input, output, session) {
   })
 
   # ---- Diagram: utveckling över tid ----
-  # Riket, Dalarna, vald kommun och valt område
+  # Valt område, vald kommun, Dalarna och riket
   geografier_tid <- reactive({
-    c("00", "20", vald_kommun(), if (kartniva() == "omrade") valt_omrade())
+    c(if (kartniva() == "omrade") valt_omrade(), vald_kommun(), "20", "00")
   })
 
   output$diagram_tid <- renderGirafe({
@@ -219,24 +225,105 @@ shinyServer(function(input, output, session) {
     df_tid <- shb_statistik %>%
       filter(indikator == input$val_indikator, regionkod %in% geografier_tid()) %>%
       left_join(geografinamn %>% select(regionkod, namn), by = "regionkod") %>%
-      mutate(
-        namn = factor(namn, levels = geografinamn$namn[match(geografier_tid(), geografinamn$regionkod)]),
-        etikett = paste0(namn, " ", ar, "<br>", formatera_varde(varde, taljare, namnare))
-      )
+      mutate(etikett = paste0(namn, " ", ar, "<br>", formatera_varde(varde, taljare, namnare)))
 
     validate(need(nrow(df_tid) > 0, "Inga data för valt urval"))
 
-    p <- ggplot(df_tid, aes(x = ar, y = varde, color = namn, group = namn)) +
+    storlek <- diagram_storlek(session, "diagram_tid")
+    koder <- geografier_tid()
+    farger <- c(farg_riket, farg_lan, farg_kommun, farg_vald)[match(koder, c("00", "20", vald_kommun(), valt_omrade()))]
+    namn <- geografinamn$namn[match(koder, geografinamn$regionkod)]
+
+    p <- ggplot(df_tid, aes(x = ar, y = varde, color = regionkod, group = regionkod)) +
       geom_line(linewidth = 1) +
       geom_point_interactive(aes(tooltip = etikett, data_id = paste(regionkod, ar)), size = 2) +
-      scale_color_manual(values = c(farg_riket, rus_tre_fokus), name = NULL) +
+      scale_color_manual(values = setNames(farger, koder), labels = setNames(namn, koder), breaks = koder, name = NULL) +
       scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
       scale_y_continuous(labels = formatera_tal) +
-      labs(x = NULL, y = enhet_text(), title = paste0(input$val_indikator, " över tid"), caption = KALLA_TEXT) +
+      labs(x = NULL, y = enhet_text(), title = str_wrap(paste0(input$val_indikator, " över tid"), storlek$tecken), caption = KALLA_TEXT) +
       tema_diagram() +
       theme(legend.position = "top", legend.justification = "left")
 
-    skapa_girafe(p)
+    skapa_girafe(p, width = storlek$width, height = storlek$height)
+  })
+
+  # ---- Diagram: alla områden i länet, per kommun ----
+  # En punkt per område, strecket visar kommunens värde. Kommunerna sorteras efter sitt värde.
+  output$diagram_alla <- renderGirafe({
+    req(input$val_indikator, input$val_ar)
+
+    varden <- shb_statistik %>%
+      filter(indikator == input$val_indikator, ar == as.integer(input$val_ar), !is.na(varde))
+
+    omr <- st_drop_geometry(shb_omraden_sf) %>%
+      inner_join(varden, by = c("omradeskod" = "regionkod"))
+
+    validate(need(nrow(omr) > 0, "Inga data för valt urval"))
+
+    kommuner <- st_drop_geometry(kommun_sf) %>%
+      inner_join(varden, by = c("kommunkod" = "regionkod"))
+    ordning <- unique(c(kommuner$kommunnamn[order(kommuner$varde)], sort(unique(omr$kommunnamn))))
+
+    vald_k <- vald_kommun()
+    vald_o <- if (kartniva() == "omrade") valt_omrade() else NULL
+
+    # Spridning i sidled utan slumptal: set.seed() skulle nollställa slumpgeneratorn som
+    # ggiraph använder för diagrammens id, så att flera diagram får samma id och ritas fel
+    omr <- omr %>%
+      arrange(omradeskod) %>%
+      group_by(kommunnamn) %>%
+      mutate(sidled = (row_number() * 0.618034) %% 1 * 0.6 - 0.3) %>%
+      ungroup() %>%
+      mutate(
+        x = match(kommunnamn, ordning) + sidled,
+        i_fokus = if (is.null(vald_k)) TRUE else kommunkod == vald_k,
+        farg = case_when(omradeskod %in% vald_o ~ farg_vald, i_fokus ~ farg_stapel, TRUE ~ farg_nedtonad),
+        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare))
+      ) %>%
+      arrange(i_fokus, omradeskod %in% vald_o)               # valda områden ritas överst
+
+    kommuner <- kommuner %>%
+      mutate(x = match(kommunnamn, ordning),
+             etikett = paste0(kommunnamn, " (hela kommunen)<br>", formatera_varde(varde, taljare, namnare)))
+
+    titel <- paste0(input$val_indikator, " per område och kommun år ", input$val_ar)
+    storlek <- diagram_storlek(session, "diagram_alla")
+
+    p <- ggplot() +
+      geom_point_interactive(data = omr, aes(x = x, y = varde, tooltip = etikett, data_id = omradeskod, fill = farg),
+                             shape = 21, color = "white", stroke = 0.3, size = 2.4) +
+      geom_segment_interactive(data = kommuner, aes(x = x - 0.4, xend = x + 0.4, y = varde, yend = varde, tooltip = etikett),
+                               color = farg_kommun, linewidth = 1.1) +
+      scale_fill_identity() +
+      scale_x_continuous(breaks = seq_along(ordning), labels = ordning, expand = expansion(add = 0.5)) +
+      scale_y_continuous(labels = formatera_tal) +
+      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, storlek$tecken),
+           subtitle = "Punkterna är områden, strecken visar kommunens värde",
+           caption = KALLA_TEXT) +
+      tema_diagram() +
+      theme(axis.text.x = element_text(angle = 30, hjust = 1),
+            panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"),
+            legend.position = "none")
+
+    skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
+  })
+
+  # Klick på ett område: gå till kommunen och markera området
+  observeEvent(input$diagram_alla_selected, {
+    kod <- input$diagram_alla_selected
+    session$sendCustomMessage(type = "diagram_alla_set", message = character(0))
+
+    kommunkod <- shb_omraden_sf$kommunkod[shb_omraden_sf$omradeskod == kod][1]
+    req(kommunkod)
+
+    if (kartniva() == "omrade" && identical(valt_omrade(), kod)) {
+      valt_omrade(NULL)
+    } else {
+      vald_kommun(kommunkod)
+      kartniva("omrade")
+      valt_omrade(kod)
+    }
   })
 
   # ---- Nedladdning ----

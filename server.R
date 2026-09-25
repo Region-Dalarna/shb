@@ -201,7 +201,7 @@ shinyServer(function(input, output, session) {
       scale_fill_identity() +
       scale_y_continuous(labels = formatera_tal) +
       scale_x_discrete(labels = function(x) str_trunc(x, 20)) +
-      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, storlek$tecken), caption = KALLA_TEXT) +
+      labs(x = NULL, y = enhet_text(), title = radbryt(titel, storlek$width), caption = KALLA_TEXT) +
       tema_diagram() +
       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = if (nrow(df_diag) > 30) 7 else diagram_axeltext_storlek),
             legend.position = "none")
@@ -240,7 +240,7 @@ shinyServer(function(input, output, session) {
       scale_color_manual(values = setNames(farger, koder), labels = setNames(namn, koder), breaks = koder, name = NULL) +
       scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
       scale_y_continuous(labels = formatera_tal) +
-      labs(x = NULL, y = enhet_text(), title = str_wrap(paste0(input$val_indikator, " över tid"), storlek$tecken), caption = KALLA_TEXT) +
+      labs(x = NULL, y = enhet_text(), title = radbryt(paste0(input$val_indikator, " över tid"), storlek$width), caption = KALLA_TEXT) +
       tema_diagram() +
       theme(legend.position = "top", legend.justification = "left")
 
@@ -297,8 +297,9 @@ shinyServer(function(input, output, session) {
       scale_fill_identity() +
       scale_x_continuous(breaks = seq_along(ordning), labels = ordning, expand = expansion(add = 0.5)) +
       scale_y_continuous(labels = formatera_tal) +
-      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, storlek$tecken),
-           subtitle = "Punkterna är områden, strecken visar kommunens värde",
+      labs(x = NULL, y = enhet_text(), title = radbryt(titel, storlek$width),
+           subtitle = radbryt("Punkterna är områden, strecken visar kommunens värde", storlek$width,
+                              storlek_pt = diagram_caption_storlek + 1, fet = FALSE),
            caption = KALLA_TEXT) +
       tema_diagram() +
       theme(axis.text.x = element_text(angle = 30, hjust = 1),

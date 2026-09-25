@@ -10,6 +10,7 @@ tema_diagram <- function() {
       panel.background = element_rect(fill = "transparent", color = NA),
       plot.background  = element_rect(fill = "transparent", color = NA),
       plot.title = element_text(size = diagram_rubrik_storlek, lineheight = 1.1, face = "bold", margin = margin(b = 6)),
+      plot.title.position = "plot",              # rubrik och underrubrik börjar vid diagrammets vänsterkant
       plot.caption = element_text(size = diagram_caption_storlek, color = "#666", hjust = 0, margin = margin(t = 6)),
       plot.margin = margin(t = 4, r = 6, b = 2, l = 6),
       axis.text = element_text(size = diagram_axeltext_storlek)
@@ -35,7 +36,6 @@ skapa_girafe <- function(p, klickbar = FALSE, width = 8, height = 3.9) {
 
 # Diagrammets storlek i tum utifrån hur stor output-cellen är i webbläsaren.
 # 80 px per tum ger lagom textstorlek (färre px per tum = mindre text i förhållande till diagrammet). Shiny ritar om diagrammet när fönstret ändrar storlek.
-# tecken = ungefär hur många tecken av rubriken som får plats på en rad.
 diagram_storlek <- function(session, output_id, px_per_tum = 80) {
   bredd <- session$clientData[[paste0("output_", output_id, "_width")]]
   hojd  <- session$clientData[[paste0("output_", output_id, "_height")]]
@@ -43,7 +43,28 @@ diagram_storlek <- function(session, output_id, px_per_tum = 80) {
     bredd <- 900
     hojd  <- 450
   }
-  list(width = max(bredd, 300) / px_per_tum, height = max(hojd, 150) / px_per_tum, tecken = floor(bredd / 7.5))
+  list(width = max(bredd, 300) / px_per_tum, height = max(hojd, 150) / px_per_tum)
+}
+
+# Radbryter en rubrik så att den ryms i diagrammets bredd (i tum). Textens bredd mäts med
+# systemfonts i samma typsnitt som diagrammet ritas med. Marginalen täcker diagrammets
+# kantluft och att webbläsarens typsnitt kan bli något bredare.
+radbryt <- function(text, bredd_tum, storlek_pt = diagram_rubrik_storlek, fet = TRUE, marginal = 0.85) {
+  max_pt <- bredd_tum * 72 * marginal
+  bredd_pt <- function(x) systemfonts::string_width(x, size = storlek_pt, res = 72, weight = if (fet) "bold" else "normal")
+
+  rader <- character(0)
+  rad <- ""
+  for (ord in strsplit(text, " ", fixed = TRUE)[[1]]) {
+    forsok <- if (rad == "") ord else paste(rad, ord)
+    if (rad != "" && bredd_pt(forsok) > max_pt) {
+      rader <- c(rader, rad)
+      rad <- ord
+    } else {
+      rad <- forsok
+    }
+  }
+  paste(c(rader, rad), collapse = "\n")
 }
 
 # ---- Formatering av tal ----

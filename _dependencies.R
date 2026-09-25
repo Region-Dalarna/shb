@@ -8,4 +8,5 @@ library(shiny.telemetry)
 library(leaflet)
 library(writexl)
 library(stringr)
+library(systemfonts)
 # ... lägg till fler paket vid behov

@@ -3,6 +3,7 @@ KALLA_TEXT <- if (shb_exempeldata) "Exempeldata – slumpade värden, inte rikti
 # Färgskala för kartan
 kartfarger <- c("#eef7f5", rus_tre_fokus[1], rus_tre_fokus[2])
 farg_stapel <- rus_tre_fokus[2]
+farg_riket  <- "#999999"
 farg_vald   <- "#000000"
 
 shinyServer(function(input, output, session) {
@@ -26,6 +27,13 @@ shinyServer(function(input, output, session) {
     kommun_sf$kommunnamn[kommun_sf$kommunkod == vald_kommun()]
   })
 
+  # "procent" eller "antal", styr axeltexter och teckenförklaring
+  enhet <- reactive({
+    req(input$val_indikator)
+    indikatorenhet(shb_statistik, input$val_indikator)
+  })
+  enhet_text <- reactive(if (enhet() == "procent") "Andel (%)" else "Antal")
+
   geografi_text <- reactive({
     if (kartniva() == "kommun") "i Dalarnas kommuner" else paste0("i ", vald_kommun_namn())
   })
@@ -43,7 +51,7 @@ shinyServer(function(input, output, session) {
 
     varden <- shb_statistik %>%
       filter(indikator == input$val_indikator, ar == as.integer(input$val_ar)) %>%
-      select(kod = regionkod, varde)
+      select(kod = regionkod, varde, taljare, namnare)
 
     left_join(geo, varden, by = "kod")
   })
@@ -121,7 +129,7 @@ shinyServer(function(input, output, session) {
     etiketter <- lapply(paste0(
       df_map$namn, "<br>",
       "<b>", input$val_indikator, "</b><br>",
-      ifelse(is.na(df_map$varde), "Uppgift saknas", format(df_map$varde, big.mark = " ", decimal.mark = ",")), "<br>",
+      formatera_varde(df_map$varde, df_map$taljare, df_map$namnare), "<br>",
       "<i>År ", input$val_ar, "</i>"
     ), HTML)
 
@@ -137,8 +145,8 @@ shinyServer(function(input, output, session) {
       ) %>%
       addLegend(
         "bottomleft", pal = pal, values = ~varde,
-        title = input$val_indikator,
-        labFormat = labelFormat(big.mark = " "),
+        title = enhet_text(),
+        labFormat = labelFormat(big.mark = " ", suffix = if (enhet() == "procent") " %" else ""),
         className = "info legend kompakt-legend"
       ) %>%
       addControl(
@@ -175,7 +183,7 @@ shinyServer(function(input, output, session) {
       filter(!is.na(varde)) %>%
       mutate(
         farg = ifelse(kod %in% vald, farg_vald, farg_stapel),
-        etikett = paste0(namn, "<br>", format(varde, big.mark = " ", decimal.mark = ","))
+        etikett = paste0(namn, "<br>", formatera_varde(varde, taljare, namnare))
       )
 
     validate(need(nrow(df_diag) > 0, "Inga data för valt urval"))
@@ -186,9 +194,9 @@ shinyServer(function(input, output, session) {
     p <- ggplot(df_diag, aes(x = reorder(namn, varde), y = varde)) +
       geom_col_interactive(aes(tooltip = etikett, data_id = kod, fill = farg), color = NA) +
       scale_fill_identity() +
-      scale_y_continuous(labels = function(x) format(x, big.mark = " ", decimal.mark = ",")) +
+      scale_y_continuous(labels = formatera_tal) +
       scale_x_discrete(labels = function(x) str_trunc(x, 20)) +
-      labs(x = NULL, y = NULL, title = str_wrap(titel, 90), caption = KALLA_TEXT) +
+      labs(x = NULL, y = enhet_text(), title = str_wrap(titel, 90), caption = KALLA_TEXT) +
       tema_diagram() +
       theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
 
@@ -200,9 +208,9 @@ shinyServer(function(input, output, session) {
   })
 
   # ---- Diagram: utveckling över tid ----
-  # Dalarna, vald kommun och valt område
+  # Riket, Dalarna, vald kommun och valt område
   geografier_tid <- reactive({
-    c("20", vald_kommun(), if (kartniva() == "omrade") valt_omrade())
+    c("00", "20", vald_kommun(), if (kartniva() == "omrade") valt_omrade())
   })
 
   output$diagram_tid <- renderGirafe({
@@ -213,7 +221,7 @@ shinyServer(function(input, output, session) {
       left_join(geografinamn %>% select(regionkod, namn), by = "regionkod") %>%
       mutate(
         namn = factor(namn, levels = geografinamn$namn[match(geografier_tid(), geografinamn$regionkod)]),
-        etikett = paste0(namn, " ", ar, "<br>", format(varde, big.mark = " ", decimal.mark = ","))
+        etikett = paste0(namn, " ", ar, "<br>", formatera_varde(varde, taljare, namnare))
       )
 
     validate(need(nrow(df_tid) > 0, "Inga data för valt urval"))
@@ -221,10 +229,10 @@ shinyServer(function(input, output, session) {
     p <- ggplot(df_tid, aes(x = ar, y = varde, color = namn, group = namn)) +
       geom_line(linewidth = 1) +
       geom_point_interactive(aes(tooltip = etikett, data_id = paste(regionkod, ar)), size = 2) +
-      scale_color_manual(values = rus_tre_fokus, name = NULL) +
+      scale_color_manual(values = c(farg_riket, rus_tre_fokus), name = NULL) +
       scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
-      scale_y_continuous(labels = function(x) format(x, big.mark = " ", decimal.mark = ",")) +
-      labs(x = NULL, y = NULL, title = paste0(input$val_indikator, " över tid"), caption = KALLA_TEXT) +
+      scale_y_continuous(labels = formatera_tal) +
+      labs(x = NULL, y = enhet_text(), title = paste0(input$val_indikator, " över tid"), caption = KALLA_TEXT) +
       tema_diagram() +
       theme(legend.position = "top", legend.justification = "left")
 
@@ -235,7 +243,7 @@ shinyServer(function(input, output, session) {
   statistik_med_namn <- function(df) {
     df %>%
       left_join(geografinamn, by = "regionkod") %>%
-      select(niva, regionkod, namn, any_of("kommun"), ar, indikator, varde) %>%
+      select(niva, regionkod, namn, any_of("kommun"), ar, indikator, taljare, namnare, varde) %>%
       arrange(indikator, niva, regionkod, ar)
   }
 
@@ -247,7 +255,7 @@ shinyServer(function(input, output, session) {
   output$export_excel_urval <- downloadHandler(
     filename = function() "shb_statistik_urval.xlsx",
     content = function(fil) {
-      koder <- c("20", data_karta()$kod, vald_kommun())
+      koder <- c("00", "20", data_karta()$kod, vald_kommun())
       shb_statistik %>%
         filter(indikator == input$val_indikator, regionkod %in% koder) %>%
         statistik_med_namn() %>%

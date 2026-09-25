@@ -30,3 +30,15 @@ skapa_girafe <- function(p, klickbar = FALSE) {
     )
   )
 }
+
+# ---- Formatering av tal ----
+formatera_tal <- function(x) {
+  vapply(x, function(v) format(v, big.mark = " ", decimal.mark = ",", scientific = FALSE), character(1))
+}
+
+# Andelar visas som "34,5 % (120 av 348)", rena antal som "120"
+formatera_varde <- function(varde, taljare, namnare) {
+  ifelse(is.na(varde), "Uppgift saknas",
+         ifelse(is.na(namnare), formatera_tal(varde),
+                paste0(formatera_tal(varde), " % (", formatera_tal(taljare), " av ", formatera_tal(namnare), ")")))
+}

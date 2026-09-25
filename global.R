@@ -28,12 +28,9 @@ options(dplyr.summarise.inform = FALSE)
 
 # ---- 1. Inställningar ----
 
-# Kolumnnamn i omradesindelningar.shb_omraden (databasen geodata).
-# Justera här om kolumnerna heter något annat. Sätt kommunkod = NA om tabellen
-# saknar kommunkod, då kopplas varje område till den kommun det ligger i geografiskt.
+# Kolumnnamn i omradesindelningar.shb_omraden (databasen geodata)
 shb_kol <- list(
-  kod       = "omradeskod",
-  namn      = "omradesnamn",
+  namn      = "omrade",
   kommunkod = "kommunkod"
 )
 
@@ -42,6 +39,7 @@ shb_kol <- list(
 # Förväntat format, se R/data_shb.R.
 shb_stat_tabell <- NULL
 
+# Källrad längst ner i diagrammen, skrivs ut precis som den står här
 KALLA_SHB <- "Källa: ..., bearbetning av Samhällsanalys, Region Dalarna"
 
 # ---- 2. Läs in kartor ----

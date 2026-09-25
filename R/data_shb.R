@@ -8,19 +8,23 @@ omradesnyckel <- function(kommunkod, omrade) paste0(kommunkod, "_", omrade)
 # så att resten av appen inte behöver veta vad de heter i databasen.
 hamta_shb_omraden <- function(con, kommun_sf, kol) {
 
-  # st_read hittar själv geometrikolumnen och koordinatsystemet
-  omr <- st_read(con, query = "SELECT * FROM omradesindelningar.shb_omraden", quiet = TRUE)
+  omr <- tbl(con, dbplyr::in_schema("omradesindelningar", "shb_omraden"))
 
-  saknas <- setdiff(unlist(kol), names(omr))
+  saknas <- setdiff(unlist(kol), colnames(omr))
   if (length(saknas) > 0) {
     stop("Kolumnerna ", paste(saknas, collapse = ", "), " finns inte i omradesindelningar.shb_omraden. ",
-         "Tillgängliga kolumner: ", paste(setdiff(names(omr), attr(omr, "sf_column")), collapse = ", "),
-         ". Justera shb_kol i global.R.")
+         "Tillgängliga kolumner: ", paste(colnames(omr), collapse = ", "), ". Justera shb_kol i global.R.")
   }
 
   omr %>%
+    select(omradesnamn = all_of(kol$namn), kommunkod = all_of(kol$kommunkod), all_of(kol$geom)) %>%
+    collect() %>%                                                  # först här görs uttaget ur databasen
+    # RPostgres levererar geometrin med klassen pq_geometry, och sf:s metod för den klassen
+    # har ett stavfel (spatiallite) som ger "object(s) should be of class 'sfg'".
+    # Som WKB går den direkt till sf:s vanliga EWKB-tolkning.
+    mutate(across(all_of(kol$geom), ~ structure(unclass(.x), class = "WKB"))) %>%
+    df_till_sf(geom_col = kol$geom) %>%                            # tabellen ligger i SWEREF99 TM (3006)
     st_transform(crs = 4326) %>%
-    select(omradesnamn = all_of(kol$namn), kommunkod = all_of(kol$kommunkod)) %>%
     mutate(kommunkod = str_pad(as.character(kommunkod), 4, pad = "0"),
            omradeskod = omradesnyckel(kommunkod, omradesnamn)) %>%
     filter(kommunkod %in% kommun_sf$kommunkod) %>%

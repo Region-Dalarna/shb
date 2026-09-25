@@ -31,7 +31,8 @@ options(dplyr.summarise.inform = FALSE)
 # Kolumnnamn i omradesindelningar.shb_omraden (databasen geodata)
 shb_kol <- list(
   namn      = "omrade",
-  kommunkod = "kommunkod"
+  kommunkod = "kommunkod",
+  geom      = "geom"
 )
 
 # Tabell med statistiken i databasen oppna_data, t.ex. c("shb", "statistik").

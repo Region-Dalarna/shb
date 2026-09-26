@@ -88,12 +88,12 @@ kort_varde <- function(varde_lag, varde_hog, t_lag, t_hog, namnare, kommentar, m
   )
 }
 
-# Litet linjediagram som inbyggd SVG: området (med intervall för ungefärliga värden) och Dalarna över tid.
+# Litet linjediagram som inbyggd SVG: området (med intervall för ungefärliga värden), Dalarna och riket över tid.
 # Byggs som text i stället för med ggplot, så att många kort kan visas utan att sidan blir långsam.
 # Varje år har en osynlig träffyta i full höjd med tooltiptext i data-tips, som visas av JavaScript i ui.R.
-linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omrade, farg_dalarna,
+linjediagram_svg <- function(omrade, dalarna, riket, valt_ar, ar_min, ar_max, farg_omrade, farg_dalarna, farg_riket,
                              bredd = 220, hojd = 56, marginal = 5) {
-  varden <- c(omrade$varde_lag, omrade$varde_hog, dalarna$mitt)
+  varden <- c(omrade$varde_lag, omrade$varde_hog, dalarna$mitt, riket$mitt)
   varden <- varden[!is.na(varden)]
   if (length(varden) == 0) return(NULL)
   y_min <- min(varden); y_max <- max(varden)
@@ -124,9 +124,11 @@ linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omra
   tips <- vapply(alla_ar, function(a) {
     o <- omrade %>% filter(ar == a)
     d <- dalarna %>% filter(ar == a)
+    r <- riket %>% filter(ar == a)
     htmltools::htmlEscape(paste0(
       "<b>", a, "</b><br>Området: ", if (nrow(o) == 1) o$text else "Uppgift saknas",
-      if (nrow(d) == 1) paste0("<br>Dalarna: ", d$text) else ""), attribute = TRUE)
+      if (nrow(d) == 1) paste0("<br>Dalarna: ", d$text) else "",
+      if (nrow(r) == 1) paste0("<br>Riket: ", r$text) else ""), attribute = TRUE)
   }, character(1))
   traffytor <- paste(sprintf('<rect x="%.1f" y="0" width="%.1f" height="%s" class="kort-traff" data-tips="%s"/>',
                              xs(alla_ar) - steg / 2, steg, hojd, tips), collapse = "")
@@ -134,6 +136,7 @@ linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omra
   paste0(
     sprintf('<svg viewBox="0 0 %s %s" class="kort-linje" role="img" aria-label="Utveckling över tid">', bredd, hojd),
     if (ar_max > ar_min) sprintf('<line x1="%.1f" x2="%.1f" y1="0" y2="%s" class="kort-valt-ar"/>', x(valt_ar), x(valt_ar), hojd) else "",
+    linje(riket, farg_riket, 1.1),
     linje(dalarna, farg_dalarna, 1.3),
     linje(omrade, farg_omrade, 2),
     paste(sprintf('<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" stroke="%s" stroke-width="4" stroke-opacity="0.3"/>',

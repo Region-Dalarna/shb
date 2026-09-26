@@ -9,6 +9,7 @@ farg_nedtonad    <- "#c6d4e1"      # områden utanför vald kommun
 farg_kommun      <- "#0f7090"
 farg_lan         <- "#54a1bd"
 farg_riket       <- "#8edded"
+farg_riket_kort  <- "#b3b3b3"      # riket i indikatorkorten, diskret grå bakom området och Dalarna
 farg_ungefarlig  <- "#a9cbe6"      # staplar och punkter med ungefärligt värde (färre än 5), ritade vid gränsen
 farg_ungefarlig_karta <- "#cccccc"
 farg_restyta     <- "#ffffff"      # del av kommunen som inte ingår i något shb-område
@@ -923,7 +924,8 @@ shinyServer(function(input, output, session) {
           div(class = paste("kort-varde", if (saknas) "kort-varde--saknas"), title = if (nrow(nu) == 1) nu$text, varde),
           div(class = forandring_klass, forandring),
           div(class = "kort-referenser", ref),
-          HTML(linjediagram_svg(omrade, d %>% filter(geografi == "Dalarna"), ar_valt, ar_min, ar_max, farg_vald, farg_lan)),
+          HTML(linjediagram_svg(omrade, d %>% filter(geografi == "Dalarna"), d %>% filter(geografi == "Riket"),
+                                ar_valt, ar_min, ar_max, farg_vald, farg_lan, farg_riket_kort)),
           div(class = "kort-axel", span(ar_min), span(ar_max)))
     }))
   }

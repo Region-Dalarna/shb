@@ -181,6 +181,7 @@ shinyUI(
           conditionalPanel("input.profil_omraden && input.profil_omraden.length > 0",
           div(class = "kort-forklaring",
               span(class = "forklaring-omrade", "Området"), span(class = "forklaring-dalarna", "Dalarna"),
+              span(class = "forklaring-riket", "Riket"),
               span("Lodrät linje: valt år. Ofylld punkt: ungefärligt värde. Håll muspekaren över ett värde för detaljer.")),
           tags$details(class = "profil-grupp", open = NA,
             tags$summary("Huvudindikatorer"),

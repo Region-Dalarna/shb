@@ -161,14 +161,24 @@ shinyUI(
           ),
           uiOutput("profil_rubrik"),
           uiOutput("profil_nyckeltal"),
-          fluidRow(
-            column(width = 7, div(class = "diagram-cell profil-cell", girafeOutput("profil_huvud", width = "100%", height = "100%"))),
-            column(width = 5, div(class = "diagram-cell profil-cell", girafeOutput("profil_inkomst", width = "100%", height = "100%")))
+          # Korten visas först när ett område är valt, annars syns bara uppmaningen i profil_rubrik
+          conditionalPanel("input.profil_omraden && input.profil_omraden.length > 0",
+          div(class = "kort-forklaring",
+              span(class = "forklaring-omrade", "Området"), span(class = "forklaring-dalarna", "Dalarna"),
+              span("Lodrät linje: valt år. Ofylld punkt: ungefärligt värde. Håll muspekaren över ett värde för detaljer.")),
+          tags$details(class = "profil-grupp", open = NA,
+            tags$summary("Huvudindikatorer"),
+            uiOutput("profil_kort_huvud")
           ),
-          div(class = "diagram-cell profil-tid", girafeOutput("profil_tid", width = "100%", height = "100%")),
-          tags$details(class = "profil-detaljer",
-            tags$summary("Bakgrundsvariabler"),
-            div(class = "diagram-cell profil-cell", girafeOutput("profil_bakgrund", width = "100%", height = "100%"))
+          tags$details(class = "profil-grupp", open = NA,
+            tags$summary("Huvudsaklig inkomstkälla, 18–64 år"),
+            div(class = "diagram-cell profil-stapel", girafeOutput("profil_inkomst", width = "100%", height = "100%")),
+            uiOutput("profil_kort_inkomst")
+          ),
+          tags$details(class = "profil-grupp", open = NA,
+            tags$summary("Bakgrund"),
+            uiOutput("profil_kort_bakgrund")
+          )
           )
         )
       ),

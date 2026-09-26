@@ -847,76 +847,80 @@ shinyServer(function(input, output, session) {
   # Nyckeltal: befolkning, hushåll och barnfamiljer i de valda områdena
   output$profil_nyckeltal <- renderUI({
     req(length(input$profil_omraden) > 0, input$prof_ar)
-    df <- profil_data() %>%
-      filter(vald, ar == as.integer(input$prof_ar), typ == "antal") %>%
+    alla <- profil_data() %>% filter(vald, typ == "antal")
+    df <- alla %>%
+      filter(ar == as.integer(input$prof_ar)) %>%
       arrange(match(indikator, c("befolkning", "antal_hushall", "antal_barnfamiljer")))
     if (nrow(df) == 0) return(NULL)
     div(class = "nyckeltal",
         lapply(seq_len(nrow(df)), function(i) {
           varde <- if (is.na(df$varde_lag[i])) "Visas inte" else formatera_tal(df$t_lag[i])
+          # Förändring i procent sedan första året med värde
+          serie <- alla %>% filter(indikator == df$indikator[i], !is.na(t_lag)) %>% arrange(ar)
+          forandring <- if (!is.na(df$t_lag[i]) && nrow(serie) > 1 && serie$ar[1] < df$ar[i] && serie$t_lag[1] > 0) {
+            p <- round((df$t_lag[i] / serie$t_lag[1] - 1) * 100)
+            paste0(if (p > 0) "+" else if (p < 0) "−" else "±", abs(p), " % sedan ", serie$ar[1])
+          }
           div(class = "nyckeltal-ruta", title = df$text[i],
               div(class = "nyckeltal-varde", varde),
-              div(class = "nyckeltal-etikett", df$indikator_namn[i]))
+              div(class = "nyckeltal-etikett", df$indikator_namn[i]),
+              if (!is.null(forandring)) div(class = "nyckeltal-forandring", forandring))
         }))
   })
-
-  # Färg och form per geografi i profildiagrammen: valda områden, kommunen (om den finns), Dalarna och riket
-  profil_skalor <- function(df) {
-    geo <- df %>% distinct(geografi, ordning, vald) %>% arrange(ordning)
-    farger <- case_when(geo$vald ~ farg_vald, geo$geografi == "Dalarna" ~ farg_lan,
-                        geo$geografi == "Riket" ~ farg_riket, TRUE ~ farg_kommun)
-    former <- case_when(geo$vald ~ 16, geo$geografi == "Dalarna" ~ 18, geo$geografi == "Riket" ~ 17, TRUE ~ 124)
-    list(farger = setNames(farger, geo$geografi), former = setNames(former, geo$geografi))
-  }
-
-  # Profildiagram: en rad per indikator, de valda områdena som punkt (med intervall om ungefärligt)
-  # och kommunen, Dalarna och riket som markeringar på samma rad
-  profildiagram <- function(output_id, grupp_urval, titel) {
-    req(input$prof_ar)
-    df <- profil_data() %>%
-      filter(grupp == grupp_urval, typ == "andel", ar == as.integer(input$prof_ar))
-    validate(need(nrow(df) > 0, "Inga data för valt urval"))
-
-    df <- df %>% mutate(rad = factor(str_wrap(indikator_namn, 32), levels = rev(unique(str_wrap(sort(indikator_namn), 32)))),
-                        etikett = paste0(geografi, "<br><b>", indikator_rubrik, "</b><br>", text))
-    valda <- df %>% filter(vald)
-    ref <- df %>% filter(!vald, !is.na(mitt))
-    dolda <- valda %>% filter(is.na(mitt))
-    skalor <- profil_skalor(df)
-    storlek <- diagram_storlek(session, output_id)
-
-    p <- ggplot(mapping = aes(y = rad)) +
-      geom_point_interactive(data = ref, aes(x = mitt, color = geografi, shape = geografi, tooltip = etikett,
-                                             size = geografi %in% c("Dalarna", "Riket")), stroke = 1.2) +  # kommunen är det enda med annan storlek
-      scale_size_manual(values = c(`TRUE` = 3.2, `FALSE` = 7), guide = "none") +                 # kommunens streck större
-      geom_linerange(data = valda %>% filter(ungefarlig), aes(xmin = varde_lag, xmax = varde_hog), color = farg_vald,
-                     linewidth = 2.5, alpha = 0.35) +
-      geom_point_interactive(data = valda %>% filter(!is.na(mitt)),
-                             aes(x = mitt, color = geografi, shape = geografi, tooltip = etikett), size = 4) +
-      { if (nrow(dolda) > 0) geom_text_interactive(data = dolda, aes(x = 0, label = "Visas inte", tooltip = etikett),
-                                                   hjust = 0, size = 3.2, color = "#777") } +
-      scale_color_manual(values = skalor$farger, breaks = names(skalor$farger), name = NULL) +
-      scale_shape_manual(values = skalor$former, breaks = names(skalor$former), name = NULL) +
-      scale_x_continuous(labels = function(x) paste(formatera_tal(x), "%"), limits = c(0, NA),
-                         expand = expansion(mult = c(0.01, 0.05))) +
-      labs(x = NULL, y = NULL, title = radbryt(titel, storlek$width),
-           subtitle = if (any(valda$ungefarlig)) radbryt("Ljust fält: ungefärligt värde, där färre än 5 har eller saknar egenskapen.",
-                                                        storlek$width, storlek_pt = diagram_caption_storlek + 1, fet = FALSE),
-           caption = KALLA_TEXT) +
-      tema_diagram() +
-      theme(legend.position = "top", legend.justification = "left", panel.grid.major.y = element_line(color = "#e6e6e6"),
-            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
-
-    skapa_girafe(p, width = storlek$width, height = storlek$height)
-  }
 
   # Cachenyckel för profilens diagram: de valda områdena (i sorterad ordning), ägarkategori och år
   profil_nyckel <- function() list(sort(input$profil_omraden), valt$agarkategori, input$prof_ar)
 
-  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer", agartext(), ", ", input$prof_ar))) %>%
-    bindCache(profil_nyckel(), utdata_storlek(session, "profil_huvud"), cache = "app")
-  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler", agartext(), ", ", input$prof_ar))) %>%
-    bindCache(profil_nyckel(), utdata_storlek(session, "profil_bakgrund"), cache = "app")
+  # Indikatorkort: ett kort per indikator med områdets värde för valt år, jämförelser och ett litet
+  # linjediagram över tid. Korten byggs som HTML, se kort_varde() och linjediagram_svg() i R/profil.R.
+  indikatorkort <- function(grupper, namn_fran_rubrik = FALSE) {
+    req(input$prof_ar)
+    df <- profil_data() %>% filter(grupp %in% grupper, typ == "andel")
+    validate(need(nrow(df) > 0, "Inga data för valt urval"))
+
+    ar_valt <- as.integer(input$prof_ar)
+    ar_min <- min(df$ar)
+    ar_max <- max(df$ar)
+    indikatorer <- shb_indikatorer %>% filter(indikator %in% df$indikator)
+    referenser <- df %>% filter(!vald) %>% distinct(geografi, ordning) %>% arrange(ordning) %>% pull(geografi)
+
+    div(class = "kortrutnat", lapply(seq_len(nrow(indikatorer)), function(k) {
+      d <- df %>% filter(indikator == indikatorer$indikator[k])
+      omrade <- d %>% filter(vald)
+      nu <- omrade %>% filter(ar == ar_valt)
+      varde <- if (nrow(nu) == 0) "Uppgift saknas" else
+        kort_varde(nu$varde_lag, nu$varde_hog, nu$t_lag, nu$t_hog, nu$namnare, nu$kommentar)
+
+      # Förändring sedan första året, bara när båda värdena är exakta
+      exakta <- omrade %>% filter(!is.na(varde_lag), varde_lag == varde_hog)
+      forandring <- if (nrow(nu) == 1 && nu$ar %in% exakta$ar && min(exakta$ar) < ar_valt) {
+        forsta <- exakta %>% filter(ar == min(ar))
+        diff <- round(nu$varde_lag - forsta$varde_lag, 1)
+        paste0(if (diff > 0) "+" else if (diff < 0) "−" else "±", formatera_tal(abs(diff)),
+               " procentenheter sedan ", forsta$ar)
+      }
+
+      ref <- lapply(referenser, function(g) {
+        r <- d %>% filter(geografi == g, ar == ar_valt)
+        div(class = "kort-ref",
+            div(class = "kort-ref-namn", g),
+            div(class = "kort-ref-varde", title = if (nrow(r) == 1) r$text,
+                if (nrow(r) == 1) kort_varde(r$varde_lag, r$varde_hog, r$t_lag, r$t_hog, r$namnare, r$kommentar) else "–"))
+      })
+
+      div(class = "indikatorkort",
+          div(class = "kort-namn", if (namn_fran_rubrik) indikatorer$indikator_rubrik[k] else indikatorer$indikator_namn[k]),
+          div(class = "kort-varde", title = if (nrow(nu) == 1) nu$text, varde),
+          div(class = "kort-forandring", forandring),
+          div(class = "kort-referenser", ref),
+          HTML(linjediagram_svg(omrade, d %>% filter(geografi == "Dalarna"), ar_valt, ar_min, ar_max, farg_vald, farg_lan)),
+          div(class = "kort-axel", span(ar_min), span(ar_max)))
+    }))
+  }
+
+  output$profil_kort_huvud <- renderUI(indikatorkort("Huvudindikator"))
+  output$profil_kort_inkomst <- renderUI(indikatorkort(grep("^Huvudsaklig inkomstkälla", shb_indikatorer$grupp, value = TRUE)))
+  output$profil_kort_bakgrund <- renderUI(indikatorkort("Bakgrund", namn_fran_rubrik = TRUE))
 
   # Huvudsaklig inkomstkälla som staplade staplar. Varje del ritas med sitt lägsta säkra värde, och
   # det som inte är känt (dolda och ungefärliga delar) visas grått som "Osäkert".
@@ -962,37 +966,6 @@ shinyServer(function(input, output, session) {
     skapa_girafe(p, width = storlek$width, height = storlek$height)
   }) %>%
     bindCache(profil_nyckel(), utdata_storlek(session, "profil_inkomst"), cache = "app")
-
-  # Utveckling över tid för huvudindikatorerna, ett litet diagram per indikator
-  output$profil_tid <- renderGirafe({
-    df <- profil_data() %>% filter(grupp == "Huvudindikator", typ == "andel", !is.na(mitt))
-    validate(need(nrow(df) > 0, "Inga data för valt urval"))
-
-    df <- df %>% mutate(etikett = paste0(geografi, " ", ar, "<br><b>", indikator_rubrik, "</b><br>", text),
-                        panel = str_wrap(indikator_namn, 28))
-    skalor <- profil_skalor(df)
-    storlek <- diagram_storlek(session, "profil_tid")
-    flera_ar <- n_distinct(df$ar) > 1
-
-    p <- ggplot(df, aes(x = ar, y = mitt, color = geografi, group = geografi)) +
-      { if (flera_ar) geom_line(linewidth = 0.9) } +
-      geom_linerange(data = df %>% filter(ungefarlig), aes(ymin = varde_lag, ymax = varde_hog), linewidth = 2.5, alpha = 0.35) +
-      geom_point_interactive(aes(tooltip = etikett, data_id = paste(geografi, indikator, ar)), size = 2) +
-      facet_wrap(~panel, nrow = 1, scales = "free_y") +
-      scale_color_manual(values = skalor$farger, breaks = names(skalor$farger), name = NULL) +
-      scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
-      scale_y_continuous(labels = function(x) paste(formatera_tal(x), "%")) +
-      labs(x = NULL, y = NULL, title = radbryt(paste0("Huvudindikatorer", agartext(), " över tid"), storlek$width),
-           subtitle = if (!flera_ar) "Utvecklingen över tid syns när statistiken innehåller fler år.",
-           caption = KALLA_TEXT) +
-      tema_diagram() +
-      theme(legend.position = "top", legend.justification = "left", strip.text = element_text(size = diagram_caption_storlek + 1, face = "bold"),
-            axis.text.x = element_text(angle = 45, hjust = 1, size = diagram_axeltext_storlek - 3),
-            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
-
-    skapa_girafe(p, width = storlek$width, height = storlek$height)
-  }) %>%
-    bindCache(sort(input$profil_omraden), valt$agarkategori, utdata_storlek(session, "profil_tid"), cache = "app")
 
   output$export_profil <- downloadHandler(
     filename = function() "shb_omradesprofil.xlsx",

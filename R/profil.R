@@ -72,3 +72,64 @@ formatera_intervall <- function(varde_lag, varde_hog, t_lag, t_hog, namnare, typ
                                formatera_tal(namnare), " ", enhet, ")")
   )
 }
+
+# ---- Indikatorkort i områdesprofilen ----
+
+# Kort text för ett värde i ett indikatorkort, t.ex. "15,8 %", "6,8–6,9 %", "Under 2,4 %" eller "Visas inte"
+kort_varde <- function(varde_lag, varde_hog, t_lag, t_hog, namnare, kommentar, min_taljare = shb_min_taljare) {
+  case_when(
+    !is.na(kommentar) ~ "Visas inte",
+    is.na(varde_lag) ~ "Uppgift saknas",
+    t_lag == 1 & t_hog == min_taljare - 1 ~ paste0("Under ", formatera_tal(round(min_taljare / namnare * 100, 1)), " %"),
+    t_hog == namnare - 1 & t_lag == namnare - (min_taljare - 1) ~
+      paste0("Över ", formatera_tal(round((namnare - min_taljare) / namnare * 100, 1)), " %"),
+    varde_lag == varde_hog ~ paste0(formatera_tal(varde_lag), " %"),
+    TRUE ~ paste0(formatera_tal(varde_lag), "–", formatera_tal(varde_hog), " %")
+  )
+}
+
+# Litet linjediagram som inbyggd SVG: området (med intervall för ungefärliga värden) och Dalarna över tid.
+# Byggs som text i stället för med ggplot, så att många kort kan visas utan att sidan blir långsam.
+# Punkterna har <title>, som webbläsaren visar som tooltip.
+linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omrade, farg_dalarna,
+                             bredd = 220, hojd = 56, marginal = 5) {
+  varden <- c(omrade$varde_lag, omrade$varde_hog, dalarna$mitt)
+  varden <- varden[!is.na(varden)]
+  if (length(varden) == 0) return(NULL)
+  y_min <- min(varden); y_max <- max(varden)
+  if (y_max - y_min < 0.5) { y_min <- y_min - 0.5; y_max <- y_max + 0.5 }
+
+  x <- function(ar) if (ar_max == ar_min) bredd / 2 else marginal + (ar - ar_min) / (ar_max - ar_min) * (bredd - 2 * marginal)
+  y <- function(v) hojd - marginal - (v - y_min) / (y_max - y_min) * (hojd - 2 * marginal)
+  xs <- function(ar) vapply(ar, x, numeric(1))
+
+  # Linje genom år med värde, bruten där ett år saknar värde
+  linje <- function(df, farg, tjocklek) {
+    df <- df %>% filter(!is.na(mitt)) %>% arrange(ar)
+    if (nrow(df) < 2) return("")
+    grupp <- cumsum(c(1, diff(df$ar) > 1))
+    paste(vapply(split(df, grupp), function(d) {
+      if (nrow(d) < 2) return("")
+      sprintf('<polyline points="%s" fill="none" stroke="%s" stroke-width="%s" stroke-linejoin="round"/>',
+              paste(sprintf("%.1f,%.1f", xs(d$ar), y(d$mitt)), collapse = " "), farg, tjocklek)
+    }, character(1)), collapse = "")
+  }
+
+  omr <- omrade %>% filter(!is.na(mitt))
+  intervall <- omr %>% filter(ungefarlig)
+
+  paste0(
+    sprintf('<svg viewBox="0 0 %s %s" class="kort-linje" role="img" aria-label="Utveckling över tid">', bredd, hojd),
+    if (ar_max > ar_min) sprintf('<line x1="%.1f" x2="%.1f" y1="0" y2="%s" class="kort-valt-ar"/>', x(valt_ar), x(valt_ar), hojd) else "",
+    linje(dalarna, farg_dalarna, 1.3),
+    linje(omrade, farg_omrade, 2),
+    paste(sprintf('<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" stroke="%s" stroke-width="4" stroke-opacity="0.3"/>',
+                  xs(intervall$ar), xs(intervall$ar), y(intervall$varde_lag), y(intervall$varde_hog), farg_omrade), collapse = ""),
+    paste(sprintf('<circle cx="%.1f" cy="%.1f" r="%s" fill="%s"><title>%s: %s</title></circle>',
+                  xs(omr$ar), y(omr$mitt), ifelse(omr$ar == valt_ar, 3.5, 2), ifelse(omr$ungefarlig, "#fff", farg_omrade),
+                  omr$ar, htmltools::htmlEscape(omr$text)), collapse = ""),
+    paste(sprintf('<circle cx="%.1f" cy="%.1f" r="%s" fill="none" stroke="%s" stroke-width="1.5"/>',
+                  xs(omr$ar[omr$ungefarlig]), y(omr$mitt[omr$ungefarlig]), 2, farg_omrade), collapse = ""),
+    "</svg>"
+  )
+}

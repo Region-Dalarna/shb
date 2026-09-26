@@ -4,12 +4,13 @@ KALLA_TEXT <- if (shb_exempeldata) "Exempeldata – slumpade värden, inte rikti
 kartpalett       <- "YlOrRd"
 farg_stapel      <- "#3182bd"
 farg_vald        <- "#e31a1c"      # valt område i diagrammen
-farg_vald_fyll   <- "#f15060"      # valt område i kartan
-farg_vald_kant   <- "#ae2d3a"
+farg_markering   <- "#1f1f1f"      # kontur runt valt område i kartan, med vit kant så att den syns mot alla färger
 farg_nedtonad    <- "#c6d4e1"      # områden utanför vald kommun
 farg_kommun      <- "#0f7090"
 farg_lan         <- "#54a1bd"
 farg_riket       <- "#8edded"
+farg_ungefarlig  <- "#a9cbe6"      # staplar och punkter med ungefärligt värde (färre än 5), ritade vid gränsen
+farg_ungefarlig_karta <- "#cccccc"
 
 # Svenska texter till tabellen (DataTables)
 dt_svenska <- list(
@@ -36,49 +37,78 @@ shinyServer(function(input, output, session) {
   valt_omrade  <- reactiveVal(NULL)             # omradeskod, markeras i karta och diagram
 
   # ---- Val av indikator, ägarkategori och år ----
-  # Flikarna har egna listrutor (val_* och jmf_*) men visar alltid samma val
-  for (id in c("val_indikator", "jmf_indikator")) updateSelectInput(session, id, choices = indikatorval)
-  for (id in c("val_agarkategori", "jmf_agarkategori")) {
-    updateSelectInput(session, id, choices = agarkategorier, selected = shb_agarkategori_standard)
+  # Valen finns på ett ställe (valt) och båda flikarnas listrutor (val_* och jmf_*) visar dem.
+  # När appen själv ändrar en listruta sparas värdet i vantar tills listrutan rapporterat det tillbaka,
+  # så att ändringen inte tolkas som användarens val. Rapporter som kommer i otakt ignoreras också.
+  # Ett väntande värde gäller i högst tio sekunder, så att en listruta aldrig fastnar. Tiden behöver
+  # räcka även när servern är upptagen med att rita diagram innan listrutan hinner svara.
+  valt <- reactiveValues(
+    indikator    = shb_indikatorer$indikator[1],
+    agarkategori = shb_agarkategori_standard,
+    ar           = NULL
+  )
+  ar_anvandare <- reactiveVal(NULL)        # år som användaren själv valt, NULL = visa alltid senaste
+  vantar <- list()
+
+  satt_listruta <- function(id, varde, choices = NULL) {
+    if (!identical(isolate(input[[id]]), varde)) vantar[[id]] <<- list(varde = varde, tid = Sys.time())
+    updateSelectInput(session, id, choices = choices, selected = varde)
   }
 
-  synka <- function(a, b) {
-    observeEvent(input[[a]], {
-      if (isTruthy(input[[a]]) && !identical(input[[a]], input[[b]])) updateSelectInput(session, b, selected = input[[a]])
-    })
-    observeEvent(input[[b]], {
-      if (isTruthy(input[[b]]) && !identical(input[[a]], input[[b]])) updateSelectInput(session, a, selected = input[[b]])
-    })
-  }
-  synka("val_indikator", "jmf_indikator")
-  synka("val_agarkategori", "jmf_agarkategori")
-  synka("val_ar", "jmf_ar")
+  listrutor <- list(indikator = c("val_indikator", "jmf_indikator"),
+                    agarkategori = c("val_agarkategori", "jmf_agarkategori"),
+                    ar = c("val_ar", "jmf_ar"))
 
-  # Bara år där indikatorn har värden går att välja
-  observeEvent(input$val_indikator, {
-    req(input$val_indikator)
-    ar <- shb_statistik %>% filter(indikator == input$val_indikator) %>% pull(ar) %>% unique() %>% sort(decreasing = TRUE)
-    valt <- if (isTruthy(input$val_ar) && input$val_ar %in% ar) input$val_ar else ar[1]
-    for (id in c("val_ar", "jmf_ar")) updateSelectInput(session, id, choices = ar, selected = valt)
+  for (id in listrutor$indikator) satt_listruta(id, isolate(valt$indikator), indikatorval)
+  for (id in listrutor$agarkategori) satt_listruta(id, isolate(valt$agarkategori), agarkategorier)
+
+  for (falt in names(listrutor)) for (id in listrutor[[falt]]) local({
+    falt <- falt
+    id <- id
+    observeEvent(input[[id]], {
+      varde <- input[[id]]
+      v <- vantar[[id]]
+      if (!is.null(v) && difftime(Sys.time(), v$tid, units = "secs") < 10) {   # appens egen ändring eller en rapport i otakt
+        if (identical(varde, v$varde)) vantar[[id]] <<- NULL
+        return()
+      }
+      vantar[[id]] <<- NULL
+      if (!isTruthy(varde) || identical(varde, valt[[falt]])) return()
+      valt[[falt]] <- varde                                   # användaren har valt
+      if (falt == "ar") ar_anvandare(varde)
+      for (annan in setdiff(listrutor[[falt]], id)) satt_listruta(annan, varde)
+    }, ignoreInit = TRUE)
   })
 
-  # Statistiken för vald indikator och ägarkategori, alla år och geografier
-  urval <- function(indikator_id, agarkategori_id) {
-    reactive({
-      req(input[[indikator_id]], input[[agarkategori_id]])
-      shb_statistik %>% filter(indikator == input[[indikator_id]], agarkategori == input[[agarkategori_id]])
-    })
-  }
-  urval_val <- urval("val_indikator", "val_agarkategori")
-  urval_jmf <- urval("jmf_indikator", "jmf_agarkategori")
+  # År: bara år där indikatorn har värden går att välja. Så länge användaren inte själv valt ett år visas
+  # det senaste året för varje indikator. Ett år som användaren valt ligger kvar vid byte av indikator,
+  # och saknas det för den nya indikatorn visas det senaste utan att valet glöms.
+  observeEvent(valt$indikator, {
+    ar <- shb_statistik %>% filter(indikator == valt$indikator) %>% pull(ar) %>% unique() %>% sort(decreasing = TRUE)
+    ar <- as.character(ar)
+    onskat <- ar_anvandare()
+    visat <- if (!is.null(onskat) && onskat %in% ar) onskat else ar[1]
+
+    if (!is.null(onskat) && !(onskat %in% ar)) {
+      showNotification(paste0(indikator_info(valt$indikator)$indikator_rubrik, " finns inte för ", onskat,
+                              ". Visar ", visat, "."), type = "message", duration = 6)
+    }
+
+    valt$ar <- visat
+    for (id in listrutor$ar) satt_listruta(id, visat, ar)
+  })
 
   indikator_info <- function(id) shb_indikatorer[shb_indikatorer$indikator == id, ][1, ]
 
-  # Text om vad som visas, t.ex. "Trångbodda enligt norm 3 (allmännyttan)"
-  urvalstext <- function(indikator_id, agarkategori_id) {
-    agar <- input[[agarkategori_id]]
-    paste0(indikator_info(input[[indikator_id]])$indikator_namn,
-           if (!identical(agar, "Totalt")) paste0(" (", tolower(agar), ")"))
+  # Statistiken för vald indikator och ägarkategori, alla år och geografier
+  urval <- reactive({
+    shb_statistik %>% filter(indikator == valt$indikator, agarkategori == valt$agarkategori)
+  })
+
+  # Text om vad som visas, t.ex. "Andel trångbodda hushåll (allmännyttan)"
+  urvalstext <- function() {
+    paste0(indikator_info(valt$indikator)$indikator_rubrik,
+           if (!identical(valt$agarkategori, "Totalt")) paste0(" (", tolower(valt$agarkategori), ")"))
   }
 
   axeltext <- function(info) if (info$typ == "andel") "Andel (%)" else paste("Antal", tolower(info$enhet))
@@ -88,15 +118,12 @@ shinyServer(function(input, output, session) {
     kommun_sf$kommunnamn[kommun_sf$kommunkod == vald_kommun()]
   })
 
-  val_info <- reactive({
-    req(input$val_indikator)
-    indikator_info(input$val_indikator)
-  })
+  val_info <- reactive(indikator_info(valt$indikator))
 
   # ---- Data för kartan och geografidiagrammet ----
   # sf-objekt med kolumnerna kod, namn och värden för den geografi som visas
   data_karta <- reactive({
-    req(input$val_ar)
+    req(valt$ar)
 
     geo <- if (kartniva() == "kommun") {
       kommun_sf %>% select(kod = kommunkod, namn = kommunnamn)
@@ -104,9 +131,9 @@ shinyServer(function(input, output, session) {
       shb_omraden_sf %>% filter(kommunkod == vald_kommun()) %>% select(kod = omradeskod, namn = omradesnamn)
     }
 
-    varden <- urval_val() %>%
-      filter(ar == as.integer(input$val_ar)) %>%
-      select(kod = regionkod, varde, taljare, namnare, enhet, skyddad, kommentar)
+    varden <- urval() %>%
+      filter(ar == as.integer(valt$ar)) %>%
+      select(kod = regionkod, varde, varde_max, varde_min, farre_an, farre_utan, taljare, namnare, enhet, skyddad, kommentar)
 
     left_join(geo, varden, by = "kod")
   })
@@ -176,33 +203,36 @@ shinyServer(function(input, output, session) {
     vald <- if (kartniva() == "omrade") valt_omrade() else NULL
     df_map$vald_geom <- !is.null(vald) & df_map$kod %in% vald
 
+    doman <- if (any(!is.na(df_map$varde))) df_map$varde else 0
+    pal <- colorNumeric(kartpalett, domain = doman, na.color = "transparent")
+    df_map$ungefarlig <- df_map$farre_an %in% TRUE | df_map$farre_utan %in% TRUE
+    df_map$fyllning <- ifelse(df_map$ungefarlig, farg_ungefarlig_karta, pal(df_map$varde))
+
     proxy <- leafletProxy("karta_shb", data = df_map) %>%
       clearShapes() %>%
       clearControls()
 
-    if (all(is.na(df_map$varde))) {
+    if (all(is.na(df_map$varde) & !df_map$ungefarlig)) {
       proxy %>% addControl("Inga data för valt urval", position = "topright", className = "map-filter-text")
       return()
     }
 
-    pal <- colorNumeric(kartpalett, domain = df_map$varde, na.color = "transparent")
-
     etiketter <- lapply(paste0(
       df_map$namn, "<br>",
-      "<b>", urvalstext("val_indikator", "val_agarkategori"), "</b><br>",
-      formatera_varde(df_map$varde, df_map$taljare, df_map$namnare, info$enhet, df_map$kommentar), "<br>",
-      "<i>År ", input$val_ar, "</i>"
+      "<b>", urvalstext(), "</b><br>",
+      formatera_varde(df_map$varde, df_map$taljare, df_map$namnare, info$enhet, df_map$kommentar, df_map$varde_max, df_map$varde_min), "<br>",
+      "<i>År ", valt$ar, "</i>"
     ), HTML)
 
     proxy %>%
       addPolygons(
         layerId     = ~kod,
-        fillColor   = ~ifelse(vald_geom, farg_vald_fyll, pal(varde)),
-        fillOpacity = ~ifelse(vald_geom, 0.95, 0.6),
-        color       = ~ifelse(vald_geom, farg_vald_kant, "#555555"),
-        weight      = ~ifelse(vald_geom, 3, 0.7),
+        fillColor   = ~fyllning,
+        fillOpacity = 0.6,
+        color       = "#555555",
+        weight      = 0.7,
         label       = etiketter,
-        highlightOptions = highlightOptions(weight = 3, color = "#000000", bringToFront = FALSE)
+        highlightOptions = highlightOptions(weight = 2, color = "#444444", bringToFront = FALSE)
       ) %>%
       addLegend(
         "bottomleft", pal = pal, values = ~varde,
@@ -210,10 +240,14 @@ shinyServer(function(input, output, session) {
         labFormat = labelFormat(big.mark = " ", suffix = if (info$typ == "andel") " %" else ""),
         className = "info legend kompakt-legend"
       ) %>%
+      { if (any(df_map$ungefarlig)) {
+          addLegend(., "bottomleft", colors = farg_ungefarlig_karta, labels = paste0("Ungefärligt värde (färre än ", shb_min_taljare, ")"),
+                    className = "info legend kompakt-legend")
+        } else . } %>%
       addControl(
-        HTML(paste0(urvalstext("val_indikator", "val_agarkategori"), "<br>",
+        HTML(paste0(urvalstext(), "<br>",
                     if (kartniva() == "kommun") "Dalarna" else vald_kommun_namn(), "<br>",
-                    "År ", input$val_ar,
+                    "År ", valt$ar,
                     if (shb_exempeldata) "<br><b>Exempeldata</b>" else "")),
         position = "topright",
         className = "map-filter-text"
@@ -224,6 +258,20 @@ shinyServer(function(input, output, session) {
         position = "bottomright",
         className = "map-klick-hint"
       )
+
+    # Valt område behåller sin färg och markeras med en tjock mörk kontur med vit kant runt och
+    # namnet som etikett, så att markeringen inte kan förväxlas med kartans färgskala.
+    # Konturerna tar inte emot klick, så ett nytt klick på området når ytan under och avmarkerar.
+    vald_sf <- df_map[df_map$vald_geom, ]
+    if (nrow(vald_sf) > 0) {
+      proxy %>%
+        addPolygons(data = vald_sf, fill = FALSE, color = "white", weight = 8, opacity = 1,
+                    options = pathOptions(interactive = FALSE)) %>%
+        addPolygons(data = vald_sf, fill = FALSE, color = farg_markering, weight = 4, opacity = 1,
+                    options = pathOptions(interactive = FALSE),
+                    label = vald_sf$namn,
+                    labelOptions = labelOptions(noHide = TRUE, direction = "top", className = "vald-etikett"))
+    }
   })
 
   # Zooma bara när geografin byts, inte när indikator eller år byts
@@ -242,6 +290,19 @@ shinyServer(function(input, output, session) {
     paste0(antal, if (antal == 1) " område visas inte" else " områden visas inte", " av sekretesskäl.")
   }
 
+  # Ungefärliga värden: färre än 5 har (farre_an) eller saknar (farre_utan) egenskapen. De ritas vid sin gräns.
+  med_ungefarliga <- function(df) {
+    df %>%
+      filter(!is.na(varde) | farre_an | farre_utan) %>%
+      mutate(ungefarlig = farre_an | farre_utan, y = coalesce(varde, varde_max, varde_min))
+  }
+
+  text_ungefarliga <- function(ungefarlig, form = "staplar") {
+    if (!any(ungefarlig %in% TRUE)) return(NULL)
+    paste0("Ljusa ", form, ": ungefärliga värden där färre än ", shb_min_taljare,
+           " har eller saknar egenskapen, ritade vid gränsvärdet.")
+  }
+
   # ---- Diagram: värde per kommun eller område ----
   output$diagram_geografi <- renderGirafe({
     vald <- if (kartniva() == "omrade") valt_omrade() else NULL
@@ -249,27 +310,27 @@ shinyServer(function(input, output, session) {
     alla <- data_karta() %>% st_drop_geometry()
 
     df_diag <- alla %>%
-      filter(!is.na(varde)) %>%
+      med_ungefarliga() %>%
       mutate(
-        farg = ifelse(kod %in% vald, farg_vald, farg_stapel),
-        etikett = paste0(namn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar))
+        farg = case_when(kod %in% vald ~ farg_vald, ungefarlig ~ farg_ungefarlig, TRUE ~ farg_stapel),
+        etikett = paste0(namn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar, varde_max, varde_min))
       )
 
     validate(need(nrow(df_diag) > 0, "Inga data för valt urval"))
 
     titel <- if (kartniva() == "kommun") {
-      paste0(urvalstext("val_indikator", "val_agarkategori"), " per kommun, ", input$val_ar)
+      paste0(urvalstext(), " per kommun, ", valt$ar)
     } else {
-      paste0(urvalstext("val_indikator", "val_agarkategori"), " per område i ", vald_kommun_namn(), ", ", input$val_ar)
+      paste0(urvalstext(), " per område i ", vald_kommun_namn(), ", ", valt$ar)
     }
     storlek <- diagram_storlek(session, "diagram_geografi")
 
     # Med många områden blir namnen på x-axeln oläsliga, då visas de bara vid hovring
     manga <- nrow(df_diag) > 25
     underrubrik <- paste(c(if (manga) "Håll muspekaren över en stapel för att se områdets namn.",
-                           text_skyddade(alla$skyddad)), collapse = " ")
+                           text_ungefarliga(df_diag$ungefarlig), text_skyddade(alla$skyddad)), collapse = " ")
 
-    p <- ggplot(df_diag, aes(x = reorder(namn, varde), y = varde)) +
+    p <- ggplot(df_diag, aes(x = reorder(namn, y), y = y)) +
       geom_col_interactive(aes(tooltip = etikett, data_id = kod, fill = farg), color = NA) +
       scale_fill_identity() +
       scale_y_continuous(labels = formatera_tal) +
@@ -298,10 +359,11 @@ shinyServer(function(input, output, session) {
   output$diagram_tid <- renderGirafe({
     info <- val_info()
 
-    df_tid <- urval_val() %>%
-      filter(regionkod %in% geografier_tid(), !is.na(varde)) %>%
+    df_tid <- urval() %>%
+      filter(regionkod %in% geografier_tid()) %>%
+      med_ungefarliga() %>%
       left_join(geografinamn %>% select(regionkod, namn), by = "regionkod") %>%
-      mutate(etikett = paste0(namn, " ", ar, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar)))
+      mutate(etikett = paste0(namn, " ", ar, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar, varde_max, varde_min)))
 
     validate(need(nrow(df_tid) > 0, "Inga data för valt urval"))
 
@@ -310,14 +372,17 @@ shinyServer(function(input, output, session) {
     farger <- c(farg_riket, farg_lan, farg_kommun, farg_vald)[match(koder, c("00", "20", vald_kommun(), valt_omrade()))]
     namn <- geografinamn$namn[match(koder, geografinamn$regionkod)]
 
-    p <- ggplot(df_tid, aes(x = ar, y = varde, color = regionkod, group = regionkod)) +
+    # Ofyllda punkter: ungefärliga värden, ritade vid gränsvärdet
+    p <- ggplot(df_tid, aes(x = ar, y = y, color = regionkod, group = regionkod)) +
       { if (n_distinct(df_tid$ar) > 1) geom_line(linewidth = 1) } +          # en linje kräver minst två år
-      geom_point_interactive(aes(tooltip = etikett, data_id = paste(regionkod, ar)), size = 2) +
+      geom_point_interactive(aes(tooltip = etikett, data_id = paste(regionkod, ar), shape = ungefarlig), size = 2,
+                             fill = "white", stroke = 1) +
+      scale_shape_manual(values = c(`FALSE` = 19, `TRUE` = 21), guide = "none") +
       scale_color_manual(values = setNames(farger, koder), labels = setNames(namn, koder), breaks = koder, name = NULL) +
       scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
       scale_y_continuous(labels = formatera_tal) +
       labs(x = NULL, y = axeltext(info),
-           title = radbryt(paste0(urvalstext("val_indikator", "val_agarkategori"), " över tid"), storlek$width),
+           title = radbryt(paste0(urvalstext(), " över tid"), storlek$width),
            caption = KALLA_TEXT) +
       tema_diagram() +
       theme(legend.position = "top", legend.justification = "left")
@@ -328,14 +393,14 @@ shinyServer(function(input, output, session) {
   # ---- Diagram: alla områden i länet, per kommun ----
   # En punkt per område, strecket visar kommunens värde. Kommunerna sorteras efter sitt värde.
   output$diagram_alla <- renderGirafe({
-    req(input$val_ar)
+    req(valt$ar)
     info <- val_info()
 
-    varden <- urval_val() %>% filter(ar == as.integer(input$val_ar))
+    varden <- urval() %>% filter(ar == as.integer(valt$ar))
 
     omr_alla <- st_drop_geometry(shb_omraden_sf) %>%
       inner_join(varden, by = c("omradeskod" = "regionkod"))
-    omr <- omr_alla %>% filter(!is.na(varde))
+    omr <- omr_alla %>% med_ungefarliga()
 
     validate(need(nrow(omr) > 0, "Inga data för valt urval"))
 
@@ -356,22 +421,23 @@ shinyServer(function(input, output, session) {
       mutate(
         x = match(kommunnamn, ordning) + sidled,
         i_fokus = if (is.null(vald_k)) TRUE else kommunkod == vald_k,
-        farg = case_when(omradeskod %in% vald_o ~ farg_vald, i_fokus ~ farg_stapel, TRUE ~ farg_nedtonad),
-        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar))
+        farg = case_when(omradeskod %in% vald_o ~ farg_vald, !i_fokus ~ farg_nedtonad,
+                         ungefarlig ~ farg_ungefarlig, TRUE ~ farg_stapel),
+        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar, varde_max, varde_min))
       ) %>%
       arrange(i_fokus, omradeskod %in% vald_o)               # valda områden ritas överst
 
     kommuner <- kommuner %>%
       mutate(x = match(kommunnamn, ordning),
-             etikett = paste0(kommunnamn, " (hela kommunen)<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar)))
+             etikett = paste0(kommunnamn, " (hela kommunen)<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar, varde_max, varde_min)))
 
-    titel <- paste0(urvalstext("val_indikator", "val_agarkategori"), " per område och kommun, ", input$val_ar)
-    underrubrik <- paste(c("Punkterna är områden, strecken visar kommunens värde.", text_skyddade(omr_alla$skyddad)),
-                         collapse = " ")
+    titel <- paste0(urvalstext(), " per område och kommun, ", valt$ar)
+    underrubrik <- paste(c("Punkterna är områden, strecken visar kommunens värde.", text_ungefarliga(omr$ungefarlig, "punkter"),
+                           text_skyddade(omr_alla$skyddad)), collapse = " ")
     storlek <- diagram_storlek(session, "diagram_alla")
 
     p <- ggplot() +
-      geom_point_interactive(data = omr, aes(x = x, y = varde, tooltip = etikett, data_id = omradeskod, fill = farg),
+      geom_point_interactive(data = omr, aes(x = x, y = y, tooltip = etikett, data_id = omradeskod, fill = farg),
                              shape = 21, color = "white", stroke = 0.3, size = 2.4) +
       geom_segment_interactive(data = kommuner, aes(x = x - 0.4, xend = x + 0.4, y = varde, yend = varde, tooltip = etikett),
                                color = farg_kommun, linewidth = 1.1) +
@@ -419,16 +485,13 @@ shinyServer(function(input, output, session) {
     valt_omrade(kod)
   }
 
-  jmf_info <- reactive({
-    req(input$jmf_indikator)
-    indikator_info(input$jmf_indikator)
-  })
+  jmf_info <- val_info
 
   # Alla områden för vald indikator, ägarkategori och år, även de som inte visas av sekretesskäl
   rangordning <- reactive({
-    req(input$jmf_ar)
+    req(valt$ar)
     st_drop_geometry(shb_omraden_sf) %>%
-      inner_join(urval_jmf() %>% filter(ar == as.integer(input$jmf_ar)), by = c("omradeskod" = "regionkod")) %>%
+      inner_join(urval() %>% filter(ar == as.integer(valt$ar)), by = c("omradeskod" = "regionkod")) %>%
       mutate(utanfor_rangordning = typ == "andel" & !skyddad & namnare < shb_min_rangordning)
   })
 
@@ -445,17 +508,25 @@ shinyServer(function(input, output, session) {
 
   rangordningsdiagram <- function(output_id, hogst) {
     info <- jmf_info()
-    alla <- rangordning() %>% filter(!is.na(varde), !utanfor_rangordning)
+    # Ungefärliga värden rangordnas efter sin gräns, på det försiktiga hållet: i listan över högst
+    # räknas "över X %" som X och "under X %" som 0, i listan över lägst räknas "under X %" som X och
+    # "över X %" som 100. Då kommer ett område bara med om det säkert hör hemma i listan.
+    alla <- rangordning() %>%
+      filter(!utanfor_rangordning) %>%
+      med_ungefarliga() %>%
+      mutate(rang = if (hogst) coalesce(varde, varde_min, if_else(farre_an, 0, NA_real_))
+                    else coalesce(varde, varde_max, if_else(farre_utan, 100, NA_real_)))
     # Lika värden sorteras på namn så att urvalet inte blir slumpmässigt
     df <- alla %>%
-      arrange(if (hogst) desc(varde) else varde, kommunnamn, omradesnamn) %>%
+      arrange(if (hogst) desc(rang) else rang, kommunnamn, omradesnamn) %>%
       slice_head(n = shb_antal_rangordning)
 
     validate(need(nrow(df) > 0, "Inga data för valt urval"))
 
     # Har fler områden samma värde som det sista i listan, t.ex. många med 0 %, sägs det i underrubriken
-    sista <- df$varde[nrow(df)]
-    fler_lika <- sum(alla$varde == sista) - sum(df$varde == sista)
+    sista <- df$rang[nrow(df)]
+    fler_lika <- sum(alla$rang == sista & !alla$ungefarlig) - sum(df$rang == sista & !df$ungefarlig)
+    if (df$ungefarlig[nrow(df)]) fler_lika <- 0
     text_lika <- if (fler_lika > 0) {
       paste0("Ytterligare ", fler_lika, " områden har också ", formatera_tal(sista),
              if (info$typ == "andel") " %" else "", " men ryms inte i listan.")
@@ -465,17 +536,19 @@ shinyServer(function(input, output, session) {
       mutate(
         axeltext = paste0(str_trunc(omradesnamn, 35), " (", kommunnamn, ")"),
         axeltext = factor(axeltext, levels = rev(unique(axeltext))),        # första området överst
-        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar))
+        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare, enhet, kommentar, varde_max, varde_min))
       )
 
-    dalarna <- urval_jmf() %>% filter(regionkod == "20", ar == as.integer(input$jmf_ar))
+    dalarna <- urval() %>% filter(regionkod == "20", ar == as.integer(valt$ar))
 
     storlek <- diagram_storlek(session, output_id)
     titel <- paste0("De ", nrow(df), " områden med ", if (hogst) "högst " else "lägst ", info$typ,
-                    ": ", urvalstext("jmf_indikator", "jmf_agarkategori"), ", ", input$jmf_ar)
+                    ": ", urvalstext(), ", ", valt$ar)
 
-    p <- ggplot(df, aes(x = varde, y = axeltext)) +
-      geom_col_interactive(aes(tooltip = etikett, data_id = omradeskod), fill = farg_stapel, width = 0.75) +
+    p <- ggplot(df, aes(x = y, y = axeltext)) +
+      geom_col_interactive(aes(tooltip = etikett, data_id = omradeskod, fill = ifelse(ungefarlig, farg_ungefarlig, farg_stapel)),
+                           width = 0.75) +
+      scale_fill_identity() +
       scale_x_continuous(labels = formatera_tal, expand = expansion(mult = c(0, 0.05))) +
       labs(x = axeltext(info), y = NULL, title = radbryt(titel, storlek$width), caption = KALLA_TEXT) +
       tema_diagram() +
@@ -487,11 +560,14 @@ shinyServer(function(input, output, session) {
         geom_vline_interactive(xintercept = dalarna$varde, color = farg_kommun, linetype = "dashed", linewidth = 0.8,
                                tooltip = paste0("Dalarna<br>", formatera_varde(dalarna$varde, dalarna$taljare,
                                                                                dalarna$namnare, dalarna$enhet))) +
-        labs(subtitle = paste(c(paste0("Streckad linje: Dalarna ", formatera_tal(dalarna$varde), " %."), text_lika), collapse = " ")) +
+        labs(subtitle = radbryt(paste(c(paste0("Streckad linje: Dalarna ", formatera_tal(dalarna$varde), " %."),
+                                        text_ungefarliga(df$ungefarlig), text_lika), collapse = " "),
+                                storlek$width, storlek_pt = diagram_caption_storlek + 1, fet = FALSE)) +
         theme(plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = farg_kommun))
-    } else if (!is.null(text_lika)) {
+    } else if (!is.null(text_lika) || any(df$ungefarlig)) {
       p <- p +
-        labs(subtitle = text_lika) +
+        labs(subtitle = radbryt(paste(c(text_ungefarliga(df$ungefarlig), text_lika), collapse = " "),
+                                storlek$width, storlek_pt = diagram_caption_storlek + 1, fet = FALSE)) +
         theme(plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
     }
 
@@ -517,6 +593,8 @@ shinyServer(function(input, output, session) {
       arrange(desc(varde)) %>%
       mutate(kommentar = case_when(
         skyddad ~ kommentar,
+        farre_an ~ paste0("Färre än ", shb_min_taljare, ", andelen är under ", formatera_tal(varde_max), " %"),
+        farre_utan ~ paste0("Alla utom färre än ", shb_min_taljare, ", andelen är över ", formatera_tal(varde_min), " %"),
         utanfor_rangordning ~ paste0("Ingår inte i rangordningen: färre än ", shb_min_rangordning, " ", tolower(enhet)),
         TRUE ~ ""
       ))
@@ -565,10 +643,17 @@ shinyServer(function(input, output, session) {
   statistik_med_namn <- function(df) {
     df %>%
       left_join(geografinamn, by = "regionkod") %>%
-      mutate(kommentar = coalesce(kommentar, "")) %>%
-      select(ar, niva, regionkod, namn, any_of("kommun"), agarkategori, grupp, indikator_namn, enhet,
+      mutate(kommentar = case_when(
+        !is.na(kommentar) ~ kommentar,
+        farre_an ~ paste0("Täljaren är färre än ", shb_min_taljare, ", andelen är under ", formatera_tal(varde_max), " %"),
+        farre_utan ~ paste0("Nämnaren minus täljaren är färre än ", shb_min_taljare, ", andelen är över ",
+                            formatera_tal(varde_min), " %"),
+        TRUE ~ ""
+      )) %>%
+      left_join(shb_indikatorer %>% select(indikator, indikator_rubrik), by = "indikator") %>%
+      select(ar, niva, regionkod, namn, any_of("kommun"), agarkategori, grupp, indikator = indikator_rubrik, enhet,
              taljare, namnare, varde, kommentar) %>%
-      arrange(grupp, indikator_namn, agarkategori, niva, regionkod, ar)
+      arrange(grupp, indikator, agarkategori, niva, regionkod, ar)
   }
 
   output$export_excel <- downloadHandler(
@@ -580,7 +665,7 @@ shinyServer(function(input, output, session) {
     filename = function() "shb_statistik_urval.xlsx",
     content = function(fil) {
       koder <- c("00", "20", data_karta()$kod, vald_kommun())
-      urval_val() %>%
+      urval() %>%
         filter(regionkod %in% koder) %>%
         statistik_med_namn() %>%
         write_xlsx(fil)

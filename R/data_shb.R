@@ -42,7 +42,7 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
 #   namnare         dbl  antal i gruppen som andelen räknas på, NA om indikatorn är ett rent antal
 #
 # Alla nivåer (område, kommun, län och riket) ska finnas som egna rader. Övriga kolumner ignoreras.
-hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_omrade, min_grupp) {
+hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_omrade, min_grupp, min_taljare) {
 
   if (is.null(tabell)) {
     df <- skapa_exempeldata(kommun_sf, omraden_sf)
@@ -52,7 +52,7 @@ hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_om
     DBI::dbDisconnect(con)
   }
 
-  resultat <- forbered_shb_statistik(df, min_befolkning_omrade, min_grupp)
+  resultat <- forbered_shb_statistik(df, min_befolkning_omrade, min_grupp, min_taljare)
   attr(resultat, "exempeldata") <- is.null(tabell)
   resultat
 }
@@ -63,8 +63,13 @@ hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_om
 # Sekretessregler:
 #   - områden där den totala befolkningen är färre än min_befolkning_omrade visas inte alls
 #   - andelar där nämnaren är färre än min_grupp, och antal under min_grupp, visas inte
+#   - andelar där täljaren är 1 till min_taljare - 1 visas som en övre gräns: täljaren döljs och
+#     andelen anges som "under X %" där X = min_taljare / nämnare (varde_max, farre_an)
+#   - andelar där nämnaren minus täljaren är 1 till min_taljare - 1 visas på samma sätt som en undre
+#     gräns: "över X %" där X = (nämnare - min_taljare) / nämnare (varde_min, farre_utan)
 # Släckta värden får en kommentar som visas i stället för värdet.
-forbered_shb_statistik <- function(df, min_befolkning_omrade, min_grupp, befolkning_indikator = "befolkning") {
+forbered_shb_statistik <- function(df, min_befolkning_omrade, min_grupp, min_taljare,
+                                   befolkning_indikator = "befolkning") {
   df <- df %>%
     mutate(
       ar_omrade = !is.na(omrade),
@@ -96,14 +101,18 @@ forbered_shb_statistik <- function(df, min_befolkning_omrade, min_grupp, befolkn
         TRUE ~ NA_character_
       ),
       skyddad = !is.na(kommentar),
-      taljare = if_else(skyddad, NA_real_, taljare),
+      farre_an = !skyddad & typ == "andel" & taljare >= 1 & taljare < min_taljare,
+      farre_utan = !skyddad & typ == "andel" & (namnare - taljare) >= 1 & (namnare - taljare) < min_taljare,
+      varde_max = if_else(farre_an, round(min_taljare / namnare * 100, 1), NA_real_),
+      varde_min = if_else(farre_utan, round((namnare - min_taljare) / namnare * 100, 1), NA_real_),
+      taljare = if_else(skyddad | farre_an | farre_utan, NA_real_, taljare),
       namnare = if_else(skyddad, NA_real_, namnare),
-      varde = case_when(skyddad ~ NA_real_,
+      varde = case_when(skyddad | farre_an | farre_utan ~ NA_real_,
                         typ == "antal" ~ taljare,
                         TRUE ~ round(taljare / namnare * 100, 1))
     ) %>%
     select(regionkod, ar, agarkategori, grupp, indikator, indikator_namn, enhet, typ,
-           taljare, namnare, varde, skyddad, kommentar)
+           taljare, namnare, varde, varde_max, varde_min, farre_an, farre_utan, skyddad, kommentar)
 }
 
 # Slumpade värden i samma format som den riktiga tabellen, används när shb_stat_tabell är NULL
@@ -145,11 +154,39 @@ skapa_exempeldata <- function(kommun_sf, omraden_sf) {
   bind_rows(alla, totalt)
 }
 
+# Rubriker som går att förstå fristående, används i diagramrubriker, tooltips, tabell och Excel.
+# I listrutan står indikatorerna under sin grupp, där räcker indikator_namn från databasen.
+# Indikatorer som saknas här får indikator_namn även som rubrik.
+shb_indikatorrubriker <- c(
+  alder_0_17                = "Andel barn 0–17 år",
+  alder_65_79               = "Andel 65–79 år",
+  alder_80_plus             = "Andel 80 år och äldre",
+  hog_kopkraft              = "Andel hushåll med hög köpkraft (över 200 % av rikets median)",
+  hyresratt                 = "Andel som bor i hyresrätt",
+  invandrat_senaste_5_ar    = "Andel som invandrat för mindre än fem år sedan",
+  kvinnor                   = "Andel kvinnor",
+  utomeuropeiskt_fodda      = "Andel utomeuropeiskt födda",
+  lag_kopkraft              = "Andel hushåll med låg köpkraft (under 60 % av rikets median)",
+  lagutbildade              = "Andel 25–64 år med högst förgymnasial utbildning",
+  ink_arbete                = "Andel 18–64 år med arbete som huvudsaklig inkomstkälla",
+  ink_arbetsloshet          = "Andel 18–64 år med arbetslöshet eller arbetsmarknadsåtgärd som huvudsaklig inkomstkälla",
+  ink_ekonomiskt_bistand    = "Andel 18–64 år med ekonomiskt bistånd som huvudsaklig inkomstkälla",
+  ink_foraldraledighet_vard = "Andel 18–64 år med föräldraledighet eller vård av anhörig som huvudsaklig inkomstkälla",
+  ink_nedsatt_arbetsformaga = "Andel 18–64 år med sjuk- eller aktivitetsersättning som huvudsaklig inkomstkälla",
+  ink_pension               = "Andel 18–64 år med pension som huvudsaklig inkomstkälla",
+  ink_saknar_inkomst        = "Andel 18–64 år som saknar inkomst",
+  ink_sjukdom               = "Andel 18–64 år med ersättning vid sjukdom som huvudsaklig inkomstkälla",
+  ink_studier               = "Andel 18–64 år med studier som huvudsaklig inkomstkälla"
+)
+
 # Indikatorerna i den ordning de visas i listrutan: huvudindikatorer först
 skapa_indikatorlista <- function(statistik) {
   statistik %>%
     distinct(grupp, indikator, indikator_namn, enhet, typ) %>%
-    mutate(grupp = factor(grupp, levels = unique(c("Huvudindikator", sort(unique(grupp)))))) %>%
+    mutate(
+      grupp = factor(grupp, levels = unique(c("Huvudindikator", sort(unique(grupp))))),
+      indikator_rubrik = coalesce(unname(shb_indikatorrubriker[indikator]), indikator_namn)
+    ) %>%
     arrange(grupp, indikator_namn)
 }
 

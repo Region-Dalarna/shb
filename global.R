@@ -44,6 +44,8 @@ shb_stat_tabell <- list(databas = "sekretess", anvandare = "shiny_las_sekretess"
 shb_min_befolkning_omrade <- 50
 # Andelar som bygger på färre personer (eller hushåll) än så här, och antal under det, visas inte
 shb_min_grupp <- 30
+# Täljare från 1 upp till under så här visas som "färre än 5" och andelen som en övre gräns
+shb_min_taljare <- 5
 
 # Områden där andelen bygger på färre än så här ingår inte i rangordningen (högst och lägst),
 # eftersom små underlag lätt ger extrema andelar. De visas i kartan, diagrammen och tabellen.
@@ -71,7 +73,7 @@ shb_omraden_sf <- hamta_shb_omraden(shiny_uppkoppling_las("geodata"), kommun_sf,
 
 # ---- 3. Läs in statistik ----
 
-shb_statistik <- hamta_shb_statistik(shb_stat_tabell, kommun_sf, shb_omraden_sf, shb_min_befolkning_omrade, shb_min_grupp)
+shb_statistik <- hamta_shb_statistik(shb_stat_tabell, kommun_sf, shb_omraden_sf, shb_min_befolkning_omrade, shb_min_grupp, shb_min_taljare)
 shb_exempeldata <- isTRUE(attr(shb_statistik, "exempeldata"))
 shb_indikatorer <- skapa_indikatorlista(shb_statistik)
 geografinamn <- skapa_geografinamn(kommun_sf, shb_omraden_sf)

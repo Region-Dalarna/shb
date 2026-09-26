@@ -177,7 +177,10 @@ shinyUI(
           tags$ul(
             tags$li(paste0('Områden med färre än ', shb_min_befolkning_omrade, ' invånare visas inte.')),
             tags$li(paste0('Andelar som bygger på färre än ', shb_min_grupp, ' personer (eller hushåll), och antal under ',
-                           shb_min_grupp, ', visas inte. Då visas varken andelen eller de antal den räknas fram från.'))
+                           shb_min_grupp, ', visas inte. Då visas varken andelen eller de antal den räknas fram från.')),
+            tags$li(paste0('När färre än ', shb_min_taljare, ' personer (eller hushåll) har en egenskap visas inte antalet.
+                           Andelen anges då som en övre gräns, till exempel under 2,4 %. I diagrammen visas de med ljusare färg
+                           vid den högsta möjliga andelen, och i kartan med grått.'))
           ),
           p(paste0('I små grupper kan en eller ett par personer påverka en andel mycket. Andelar som bygger på färre än ',
                    shb_min_rangordning, ' personer ingår därför inte när områdena rangordnas, men visas i kartan, diagrammen och tabellen.')),

@@ -72,12 +72,19 @@ formatera_tal <- function(x) {
   vapply(x, function(v) format(v, big.mark = " ", decimal.mark = ",", scientific = FALSE), character(1))
 }
 
-# Andelar visas som "34,5 % (120 av 348 personer)", antal som "912 personer" och
-# sekretessgranskade värden med sin kommentar, t.ex. "Visas inte: färre än 30 personer"
-formatera_varde <- function(varde, taljare, namnare, enhet, kommentar = NA_character_) {
+# Andelar visas som "34,5 % (120 av 348 personer)", antal som "912 personer", små täljare som
+# "Under 2,4 % (färre än 5 av 208 personer)", små motsatta grupper som
+# "Över 97,6 % (alla utom färre än 5 av 208 personer)" och sekretessgranskade värden med sin
+# kommentar, t.ex. "Visas inte: färre än 30 personer"
+formatera_varde <- function(varde, taljare, namnare, enhet, kommentar = NA_character_, varde_max = NA_real_,
+                            varde_min = NA_real_, min_taljare = shb_min_taljare) {
   enhet <- tolower(enhet)
   case_when(
     !is.na(kommentar) ~ kommentar,
+    !is.na(varde_max) ~ paste0("Under ", formatera_tal(varde_max), " % (färre än ", min_taljare, " av ",
+                               formatera_tal(namnare), " ", enhet, ")"),
+    !is.na(varde_min) ~ paste0("Över ", formatera_tal(varde_min), " % (alla utom färre än ", min_taljare, " av ",
+                               formatera_tal(namnare), " ", enhet, ")"),
     is.na(varde)      ~ "Uppgift saknas",
     is.na(namnare)    ~ paste0(formatera_tal(varde), " ", enhet),
     TRUE              ~ paste0(formatera_tal(varde), " % (", formatera_tal(taljare), " av ",

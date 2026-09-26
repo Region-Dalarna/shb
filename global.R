@@ -56,6 +56,10 @@ shb_min_rangordning <- 50
 # länets och rikets värden.
 shb_restyta_namn <- "Uppgift saknas"
 
+# Kartans geometri förenklas med så här många meter när den läses in, så att kartan går snabbare.
+# Sätt till NULL för att använda geometrin som den är.
+shb_forenkling_meter <- 10
+
 # Ägarkategori som är förvald
 shb_agarkategori_standard <- "Totalt"
 
@@ -71,10 +75,11 @@ kommun_sf <- tbl(shiny_uppkoppling_las("geodata"), dbplyr::in_schema("karta", "k
   filter(str_sub(knkod, 1, 2) == "20") %>%                                               # filtrera ut Dalarnas kommuner
   collect() %>%
   df_till_sf() %>%
+  forenkla_geometri(shb_forenkling_meter) %>%
   select(kommunkod = knkod, kommunnamn = knnamn) %>%
   st_transform(crs = 4326)
 
-shb_omraden_sf <- hamta_shb_omraden(shiny_uppkoppling_las("geodata"), kommun_sf, shb_kol)
+shb_omraden_sf <- hamta_shb_omraden(shiny_uppkoppling_las("geodata"), kommun_sf, shb_kol, shb_forenkling_meter)
 
 # ---- 3. Läs in statistik ----
 

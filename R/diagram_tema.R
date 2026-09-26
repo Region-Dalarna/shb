@@ -34,16 +34,21 @@ skapa_girafe <- function(p, klickbar = FALSE, width = 8, height = 3.9) {
   )
 }
 
-# Diagrammets storlek i tum utifrån hur stor output-cellen är i webbläsaren.
-# 80 px per tum ger lagom textstorlek (färre px per tum = mindre text i förhållande till diagrammet). Shiny ritar om diagrammet när fönstret ändrar storlek.
-diagram_storlek <- function(session, output_id, px_per_tum = 80) {
+# Output-cellens storlek i webbläsaren i px, avrundad till tiotal så att besökare med nästan lika stora
+# fönster kan dela diagram i cachen. Används både för att rita diagrammet och som del av cachenyckeln.
+utdata_storlek <- function(session, output_id) {
   bredd <- session$clientData[[paste0("output_", output_id, "_width")]]
   hojd  <- session$clientData[[paste0("output_", output_id, "_height")]]
-  if (is.null(bredd) || is.null(hojd) || bredd == 0 || hojd == 0) {
-    bredd <- 900
-    hojd  <- 450
-  }
-  list(width = max(bredd, 300) / px_per_tum, height = max(hojd, 150) / px_per_tum)
+  if (is.null(bredd) || is.null(hojd) || bredd == 0 || hojd == 0) return(c(900, 450))
+  c(max(round(bredd / 10) * 10, 300), max(round(hojd / 10) * 10, 150))
+}
+
+# Diagrammets storlek i tum utifrån cellens storlek i webbläsaren. Shiny ritar om diagrammet när
+# fönstret ändrar storlek. 80 px per tum ger lagom textstorlek (färre px per tum = mindre text i
+# förhållande till diagrammet).
+diagram_storlek <- function(session, output_id, px_per_tum = 80) {
+  px <- utdata_storlek(session, output_id)
+  list(width = px[1] / px_per_tum, height = px[2] / px_per_tum)
 }
 
 # Radbryter en rubrik så att den ryms i diagrammets bredd (i tum). Textens bredd mäts med
@@ -68,8 +73,15 @@ radbryt <- function(text, bredd_tum, storlek_pt = diagram_rubrik_storlek, fet = 
 }
 
 # ---- Formatering av tal ----
+# "1 234,5" med mellanslag som tusentalsavgränsare, decimalkomma och utan onödiga nollor.
+# Görs för hela vektorn på en gång, det är betydligt snabbare än format() tal för tal.
 formatera_tal <- function(x) {
-  vapply(x, function(v) format(v, big.mark = " ", decimal.mark = ",", scientific = FALSE), character(1))
+  s <- sprintf("%.2f", x)
+  s <- sub("\\.?0+$", "", s)                                        # 15.80 -> 15.8, 282.00 -> 282
+  s <- gsub("(\\d)(?=(\\d{3})+(?!\\d))", "\\1 ", s, perl = TRUE)     # tusentalsavgränsare
+  s <- sub(".", ",", s, fixed = TRUE)
+  s[is.na(x)] <- "NA"
+  s
 }
 
 # Andelar visas som "34,5 % (120 av 348 personer)", antal som "912 personer", små täljare som

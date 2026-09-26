@@ -6,7 +6,7 @@ omradesnyckel <- function(kommunkod, omrade) paste0(kommunkod, "_", omrade)
 
 # Läser in shb_omraden och döper om kolumnerna till omradeskod, omradesnamn och kommunkod,
 # så att resten av appen inte behöver veta vad de heter i databasen.
-hamta_shb_omraden <- function(con, kommun_sf, kol) {
+hamta_shb_omraden <- function(con, kommun_sf, kol, forenkling_meter = NULL) {
 
   omr <- tbl(con, dbplyr::in_schema("omradesindelningar", "shb_omraden"))
 
@@ -20,6 +20,7 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
     select(omradesnamn = all_of(kol$namn), kommunkod = all_of(kol$kommunkod), all_of(kol$geom)) %>%
     collect() %>%                                                  # först här görs uttaget ur databasen
     df_till_sf(geom_col = kol$geom) %>%                            # tabellen ligger i SWEREF99 TM (3006)
+    forenkla_geometri(forenkling_meter) %>%
     st_transform(crs = 4326) %>%
     mutate(kommunkod = str_pad(as.character(kommunkod), 4, pad = "0"),
            omradeskod = omradesnyckel(kommunkod, omradesnamn)) %>%
@@ -27,6 +28,18 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
     left_join(st_drop_geometry(kommun_sf), by = "kommunkod") %>%
     mutate(restyta = omradesnamn == shb_restyta_namn) %>%
     select(omradeskod, omradesnamn, kommunkod, kommunnamn, restyta)
+}
+
+# Förenklar geometrin så att kartan skickar färre punkter till webbläsaren vid varje kartbyte.
+# Toleransen är i meter, så geometrin måste ligga i SWEREF99 TM. NULL = ingen förenkling.
+forenkla_geometri <- function(geo, forenkling_meter) {
+  if (is.null(forenkling_meter)) return(geo)
+  punkter <- function(g) sum(vapply(st_geometry(g), function(x) length(unlist(x)) / 2, numeric(1)))
+  fore <- punkter(geo)
+  geo <- st_simplify(geo, preserveTopology = TRUE, dTolerance = forenkling_meter)
+  message(sprintf("Kartgeometri förenklad med %s m: %s punkter blev %s", forenkling_meter,
+                  formatera_tal(fore), formatera_tal(punkter(geo))))
+  geo
 }
 
 # Statistiken ligger i långt format med en rad per geografi, år, ägarkategori och indikator:
@@ -49,7 +62,11 @@ hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_om
     df <- skapa_exempeldata(kommun_sf, omraden_sf)
   } else {
     con <- shiny_uppkoppling_las(db_name = tabell$databas, db_user = tabell$anvandare)
-    df <- tbl(con, dbplyr::in_schema(tabell$schema, tabell$tabell)) %>% collect()
+    # Bara kolumner som appen använder, och inte rader som saknar värde
+    df <- tbl(con, dbplyr::in_schema(tabell$schema, tabell$tabell)) %>%
+      select(ar, regionkod, omrade, agarkategori, grupp, indikator, indikator_namn, enhet, taljare, namnare) %>%
+      filter(!is.na(taljare)) %>%
+      collect()
     DBI::dbDisconnect(con)
   }
 

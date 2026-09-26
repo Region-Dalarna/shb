@@ -31,6 +31,38 @@ agarkategorier <- intersect(c("Totalt", "Allmännyttan", "Övriga ägare", "Uppg
 kommuner_utan_omraden <- setdiff(kommun_sf$kommunkod, shb_omraden_sf$kommunkod[!shb_omraden_sf$restyta])
 restytor <- shb_omraden_sf$omradeskod[shb_omraden_sf$restyta]
 
+# Reglage för hur mycket områdenas färg täcker bakgrundskartan. Läggs till direkt i webbläsaren, så att
+# clearControls() inte tar bort det när kartan ritas om, och ändrar färgerna utan att fråga servern.
+# Varje yta behåller sin grundtäckning i förhållande till de andra (restytor är svagare), och
+# täckningen sätts också på ytor som ritas senare och efter att muspekaren lämnat en yta.
+js_tackning <- "function(el, x) {
+  var map = this, faktor = 1;
+  var stil = function(l) {
+    if (!l.setStyle || !l.options || l.options.fill === false || l.options.fillOpacity === undefined) return;
+    if (l._grundtackning === undefined) {
+      l._grundtackning = l.options.fillOpacity;
+      l.on('mouseout', function() { l.setStyle({fillOpacity: l._grundtackning * faktor}); });
+    }
+    l.setStyle({fillOpacity: l._grundtackning * faktor});
+  };
+  var reglage = L.control({position: 'topleft'});
+  reglage.onAdd = function() {
+    var div = L.DomUtil.create('div', 'leaflet-bar tackning-reglage');
+    div.innerHTML = '<a href=\"#\" role=\"button\" title=\"Ändra hur mycket färgen täcker kartan\"><i class=\"fa fa-adjust\"></i></a>' +
+                    '<input type=\"range\" min=\"0\" max=\"160\" value=\"100\" aria-label=\"Färgens täckning\">';
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    div.querySelector('a').addEventListener('click', function(e) { e.preventDefault(); div.classList.toggle('oppen'); });
+    div.querySelector('input').addEventListener('input', function(e) {
+      faktor = e.target.value / 100;
+      map.eachLayer(stil);
+    });
+    return div;
+  };
+  reglage.addTo(map);
+  map.on('layeradd', function(e) { stil(e.layer); });
+}"
+
 shinyServer(function(input, output, session) {
   rdshinyappar::telemetri_server(telemetry, navigation_id = 'flikval', forsta_flik = 'Karta och diagram')
 
@@ -211,7 +243,8 @@ shinyServer(function(input, output, session) {
           title = "Visa alla kommuner igen",
           onClick = JS("function(btn, map){ Shiny.setInputValue('reset_map', true); }")
         )
-      )
+      ) %>%
+      htmlwidgets::onRender(js_tackning)
   })
 
   observe({
@@ -371,7 +404,9 @@ shinyServer(function(input, output, session) {
             legend.position = "none")
 
     skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
-  })
+  }) %>%
+    bindCache(valt$indikator, valt$agarkategori, valt$ar, kartniva(), vald_kommun(),
+              if (kartniva() == "omrade") valt_omrade(), utdata_storlek(session, "diagram_geografi"), cache = "app")
 
   output$geografi_klick_text <- renderText({
     if (kartniva() == "kommun") "Klicka på en kommun för att se områden" else "Klicka på ett område för att markera"
@@ -416,7 +451,8 @@ shinyServer(function(input, output, session) {
             axis.text.x = if (n_distinct(df_tid$ar) > 6) element_text(angle = 45, hjust = 1, size = diagram_axeltext_storlek - 2))
 
     skapa_girafe(p, width = storlek$width, height = storlek$height)
-  })
+  }) %>%
+    bindCache(valt$indikator, valt$agarkategori, geografier_tid(), utdata_storlek(session, "diagram_tid"), cache = "app")
 
   # ---- Diagram: alla områden i länet, per kommun ----
   # En punkt per område, strecket visar kommunens värde. Kommunerna sorteras efter sitt värde.
@@ -482,7 +518,9 @@ shinyServer(function(input, output, session) {
             legend.position = "none")
 
     skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
-  })
+  }) %>%
+    bindCache(valt$indikator, valt$agarkategori, valt$ar, vald_kommun(), if (kartniva() == "omrade") valt_omrade(),
+              utdata_storlek(session, "diagram_alla"), cache = "app")
 
   # Klick på ett område: gå till kommunen och markera området
   observeEvent(input$diagram_alla_selected, {
@@ -604,8 +642,10 @@ shinyServer(function(input, output, session) {
     skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
   }
 
-  output$diagram_hogst <- renderGirafe(rangordningsdiagram("diagram_hogst", hogst = TRUE))
-  output$diagram_lagst <- renderGirafe(rangordningsdiagram("diagram_lagst", hogst = FALSE))
+  output$diagram_hogst <- renderGirafe(rangordningsdiagram("diagram_hogst", hogst = TRUE)) %>%
+    bindCache(valt$indikator, valt$agarkategori, valt$ar, utdata_storlek(session, "diagram_hogst"), cache = "app")
+  output$diagram_lagst <- renderGirafe(rangordningsdiagram("diagram_lagst", hogst = FALSE)) %>%
+    bindCache(valt$indikator, valt$agarkategori, valt$ar, utdata_storlek(session, "diagram_lagst"), cache = "app")
 
   observeEvent(input$diagram_hogst_selected, {
     session$sendCustomMessage(type = "diagram_hogst_set", message = character(0))
@@ -853,8 +893,13 @@ shinyServer(function(input, output, session) {
     skapa_girafe(p, width = storlek$width, height = storlek$height)
   }
 
-  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer", agartext(), ", ", input$prof_ar)))
-  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler", agartext(), ", ", input$prof_ar)))
+  # Cachenyckel för profilens diagram: de valda områdena (i sorterad ordning), ägarkategori och år
+  profil_nyckel <- function() list(sort(input$profil_omraden), valt$agarkategori, input$prof_ar)
+
+  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer", agartext(), ", ", input$prof_ar))) %>%
+    bindCache(profil_nyckel(), utdata_storlek(session, "profil_huvud"), cache = "app")
+  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler", agartext(), ", ", input$prof_ar))) %>%
+    bindCache(profil_nyckel(), utdata_storlek(session, "profil_bakgrund"), cache = "app")
 
   # Huvudsaklig inkomstkälla som staplade staplar. Varje del ritas med sitt lägsta säkra värde, och
   # det som inte är känt (dolda och ungefärliga delar) visas grått som "Osäkert".
@@ -898,7 +943,8 @@ shinyServer(function(input, output, session) {
             legend.key.size = unit(0.35, "cm"), panel.grid.major.y = element_blank())
 
     skapa_girafe(p, width = storlek$width, height = storlek$height)
-  })
+  }) %>%
+    bindCache(profil_nyckel(), utdata_storlek(session, "profil_inkomst"), cache = "app")
 
   # Utveckling över tid för huvudindikatorerna, ett litet diagram per indikator
   output$profil_tid <- renderGirafe({
@@ -928,7 +974,8 @@ shinyServer(function(input, output, session) {
             plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
 
     skapa_girafe(p, width = storlek$width, height = storlek$height)
-  })
+  }) %>%
+    bindCache(sort(input$profil_omraden), valt$agarkategori, utdata_storlek(session, "profil_tid"), cache = "app")
 
   output$export_profil <- downloadHandler(
     filename = function() "shb_omradesprofil.xlsx",

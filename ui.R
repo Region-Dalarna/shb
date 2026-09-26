@@ -138,7 +138,7 @@ shinyUI(
               )
             )
           ),
-          h4(class = "jamfor-rubrik", "Alla områden"),
+          h4(class = "jamfor-rubrik", textOutput("jmf_tabellrubrik", inline = TRUE)),
           p(class = "jamfor-hjalp", "Sök efter ett område eller en kommun, sortera genom att klicka på en kolumnrubrik
                                      och klicka på en rad för att se området i kartan."),
           DTOutput("tabell_omraden")

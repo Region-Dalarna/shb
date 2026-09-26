@@ -107,11 +107,18 @@ shinyServer(function(input, output, session) {
     shb_statistik %>% filter(indikator == valt$indikator, agarkategori == valt$agarkategori)
   })
 
-  # Text om vad som visas, t.ex. "Andel trångbodda hushåll (allmännyttan)"
-  urvalstext <- function() {
-    paste0(indikator_info(valt$indikator)$indikator_rubrik,
-           if (!identical(valt$agarkategori, "Totalt")) paste0(" (", tolower(valt$agarkategori), ")"))
+  # Ägarkategorin som text i rubriker, t.ex. "i allmännyttan". Tom för Totalt.
+  agartext <- function(agarkategori = valt$agarkategori) {
+    switch(agarkategori,
+           "Totalt"         = "",
+           "Allmännyttan"   = " i allmännyttan",
+           "Övriga ägare"   = " i bostäder med övriga ägare",
+           "Uppgift saknas" = " i bostäder där uppgift om ägare saknas",
+           paste0(" i ", tolower(agarkategori)))
   }
+
+  # Text om vad som visas, t.ex. "Andel 18–64 år som saknar inkomst i allmännyttan"
+  urvalstext <- function() paste0(indikator_info(valt$indikator)$indikator_rubrik, agartext())
 
   axeltext <- function(info) if (info$typ == "andel") "Andel (%)" else paste("Antal", tolower(info$enhet))
 
@@ -405,7 +412,8 @@ shinyServer(function(input, output, session) {
            title = radbryt(paste0(urvalstext(), " över tid"), storlek$width),
            caption = KALLA_TEXT) +
       tema_diagram() +
-      theme(legend.position = "top", legend.justification = "left")
+      theme(legend.position = "top", legend.justification = "left",
+            axis.text.x = if (n_distinct(df_tid$ar) > 6) element_text(angle = 45, hjust = 1, size = diagram_axeltext_storlek - 2))
 
     skapa_girafe(p, width = storlek$width, height = storlek$height)
   })
@@ -514,6 +522,8 @@ shinyServer(function(input, output, session) {
       inner_join(urval() %>% filter(ar == as.integer(valt$ar)), by = c("omradeskod" = "regionkod")) %>%
       mutate(utanfor_rangordning = typ == "andel" & !skyddad & namnare < shb_min_rangordning)
   })
+
+  output$jmf_tabellrubrik <- renderText(paste0("Alla områden: ", urvalstext(), ", ", valt$ar))
 
   output$jmf_info <- renderText({
     df <- rangordning()
@@ -727,13 +737,13 @@ shinyServer(function(input, output, session) {
     koder <- profil_koder()
     agar <- shb_statistik %>% filter(agarkategori == valt$agarkategori)
 
-    valda <- sla_ihop_omraden(agar, koder, shb_min_taljare) %>% mutate(geografi = "Valda områden", ordning = 1)
+    valda <- sla_ihop_omraden(agar, koder, shb_min_taljare) %>% mutate(geografi = profil_etikett(), ordning = 1, vald = TRUE)
     ref_koder <- c(if (length(profil_kommuner()) == 1) profil_kommuner(), "20", "00")
     ref <- agar %>%
       filter(regionkod %in% ref_koder) %>%
       som_intervall(shb_min_taljare) %>%
       mutate(geografi = geografinamn$namn[match(regionkod, geografinamn$regionkod)],
-             ordning = match(regionkod, ref_koder) + 1)
+             ordning = match(regionkod, ref_koder) + 1, vald = FALSE)
 
     bind_rows(valda, ref) %>%
       left_join(shb_indikatorer %>% select(indikator, indikator_rubrik), by = "indikator") %>%
@@ -751,6 +761,14 @@ shinyServer(function(input, output, session) {
     if (n == 1) namn
     else if (n <= 3) paste0(paste(namn[-n], collapse = ", "), " och ", namn[n])
     else paste0(paste(namn[1:2], collapse = ", "), " och ", n - 2, " områden till")
+  })
+
+  # Etikett för de valda områdena i diagrammen: namnet om det är kort nog, annars "Valda områden".
+  # Heter ett område som en kommun, Dalarna eller riket läggs "Området" till så att de inte blandas ihop.
+  profil_etikett <- reactive({
+    namn <- profil_namn()
+    if (nchar(namn) > 32 || grepl(" områden till$", namn)) return("Valda områden")
+    if (namn %in% c(kommun_sf$kommunnamn, "Dalarna", "Riket")) paste("Området", namn) else namn
   })
 
   output$profil_rubrik <- renderUI({
@@ -773,7 +791,7 @@ shinyServer(function(input, output, session) {
   output$profil_nyckeltal <- renderUI({
     req(length(input$profil_omraden) > 0, input$prof_ar)
     df <- profil_data() %>%
-      filter(geografi == "Valda områden", ar == as.integer(input$prof_ar), typ == "antal") %>%
+      filter(vald, ar == as.integer(input$prof_ar), typ == "antal") %>%
       arrange(match(indikator, c("befolkning", "antal_hushall", "antal_barnfamiljer")))
     if (nrow(df) == 0) return(NULL)
     div(class = "nyckeltal",
@@ -787,12 +805,11 @@ shinyServer(function(input, output, session) {
 
   # Färg och form per geografi i profildiagrammen: valda områden, kommunen (om den finns), Dalarna och riket
   profil_skalor <- function(df) {
-    geo <- df %>% distinct(geografi, ordning) %>% arrange(ordning) %>% pull(geografi)
-    kommun <- setdiff(geo, c("Valda områden", "Dalarna", "Riket"))
-    farger <- c("Valda områden" = farg_vald, setNames(rep(farg_kommun, length(kommun)), kommun),
-                "Dalarna" = farg_lan, "Riket" = farg_riket)
-    former <- c("Valda områden" = 16, setNames(rep(124, length(kommun)), kommun), "Dalarna" = 18, "Riket" = 17)
-    list(farger = farger[geo], former = former[geo])
+    geo <- df %>% distinct(geografi, ordning, vald) %>% arrange(ordning)
+    farger <- case_when(geo$vald ~ farg_vald, geo$geografi == "Dalarna" ~ farg_lan,
+                        geo$geografi == "Riket" ~ farg_riket, TRUE ~ farg_kommun)
+    former <- case_when(geo$vald ~ 16, geo$geografi == "Dalarna" ~ 18, geo$geografi == "Riket" ~ 17, TRUE ~ 124)
+    list(farger = setNames(farger, geo$geografi), former = setNames(former, geo$geografi))
   }
 
   # Profildiagram: en rad per indikator, de valda områdena som punkt (med intervall om ungefärligt)
@@ -805,15 +822,15 @@ shinyServer(function(input, output, session) {
 
     df <- df %>% mutate(rad = factor(str_wrap(indikator_namn, 32), levels = rev(unique(str_wrap(sort(indikator_namn), 32)))),
                         etikett = paste0(geografi, "<br><b>", indikator_rubrik, "</b><br>", text))
-    valda <- df %>% filter(geografi == "Valda områden")
-    ref <- df %>% filter(geografi != "Valda områden", !is.na(mitt))
+    valda <- df %>% filter(vald)
+    ref <- df %>% filter(!vald, !is.na(mitt))
     dolda <- valda %>% filter(is.na(mitt))
     skalor <- profil_skalor(df)
     storlek <- diagram_storlek(session, output_id)
 
     p <- ggplot(mapping = aes(y = rad)) +
       geom_point_interactive(data = ref, aes(x = mitt, color = geografi, shape = geografi, tooltip = etikett,
-                                             size = geografi %in% c("Dalarna", "Riket")), stroke = 1.2) +
+                                             size = geografi %in% c("Dalarna", "Riket")), stroke = 1.2) +  # kommunen är det enda med annan storlek
       scale_size_manual(values = c(`TRUE` = 3.2, `FALSE` = 7), guide = "none") +                 # kommunens streck större
       geom_linerange(data = valda %>% filter(ungefarlig), aes(xmin = varde_lag, xmax = varde_hog), color = farg_vald,
                      linewidth = 2.5, alpha = 0.35) +
@@ -836,8 +853,8 @@ shinyServer(function(input, output, session) {
     skapa_girafe(p, width = storlek$width, height = storlek$height)
   }
 
-  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer, ", input$prof_ar)))
-  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler, ", input$prof_ar)))
+  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer", agartext(), ", ", input$prof_ar)))
+  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler", agartext(), ", ", input$prof_ar)))
 
   # Huvudsaklig inkomstkälla som staplade staplar. Varje del ritas med sitt lägsta säkra värde, och
   # det som inte är känt (dolda och ungefärliga delar) visas grått som "Osäkert".
@@ -873,7 +890,7 @@ shinyServer(function(input, output, session) {
       geom_col_interactive(aes(tooltip = etikett, data_id = paste(geografi, indikator)), width = 0.7, color = "white", linewidth = 0.2) +
       scale_fill_manual(values = inkomstfarger, labels = unname(namn[nivaer]), breaks = nivaer, name = NULL) +
       scale_x_continuous(labels = function(x) paste(formatera_tal(x), "%"), expand = expansion(mult = c(0, 0.02))) +
-      labs(x = NULL, y = NULL, title = radbryt(paste0("Huvudsaklig inkomstkälla, 18–64 år, ", input$prof_ar), storlek$width),
+      labs(x = NULL, y = NULL, title = radbryt(paste0("Huvudsaklig inkomstkälla 18–64 år", agartext(), ", ", input$prof_ar), storlek$width),
            caption = KALLA_TEXT) +
       guides(fill = guide_legend(ncol = 2)) +
       tema_diagram() +
@@ -902,11 +919,12 @@ shinyServer(function(input, output, session) {
       scale_color_manual(values = skalor$farger, breaks = names(skalor$farger), name = NULL) +
       scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
       scale_y_continuous(labels = function(x) paste(formatera_tal(x), "%")) +
-      labs(x = NULL, y = NULL, title = radbryt("Huvudindikatorer över tid", storlek$width),
+      labs(x = NULL, y = NULL, title = radbryt(paste0("Huvudindikatorer", agartext(), " över tid"), storlek$width),
            subtitle = if (!flera_ar) "Utvecklingen över tid syns när statistiken innehåller fler år.",
            caption = KALLA_TEXT) +
       tema_diagram() +
       theme(legend.position = "top", legend.justification = "left", strip.text = element_text(size = diagram_caption_storlek + 1, face = "bold"),
+            axis.text.x = element_text(angle = 45, hjust = 1, size = diagram_axeltext_storlek - 3),
             plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
 
     skapa_girafe(p, width = storlek$width, height = storlek$height)
@@ -916,7 +934,7 @@ shinyServer(function(input, output, session) {
     filename = function() "shb_omradesprofil.xlsx",
     content = function(fil) {
       profil_data() %>%
-        transmute(Geografi = if_else(geografi == "Valda områden", profil_namn(), geografi),
+        transmute(Geografi = if_else(vald, profil_namn(), geografi),
                   `År` = ar, `Ägarkategori` = agarkategori, Grupp = as.character(grupp), Indikator = indikator_rubrik,
                   `Värde` = text, `Lägsta värde` = varde_lag, `Högsta värde` = varde_hog) %>%
         arrange(Grupp, Indikator, `År`, match(Geografi, unique(Geografi))) %>%

@@ -55,8 +55,9 @@ shinyUI(
             column(
               width = 8,
               div(class = "diagram-toolbar",
-                  div(selectInput("val_indikator", "Indikator", choices = NULL)),
-                  div(selectInput("val_ar", "År", choices = NULL)),
+                  div(class = "val-indikator", selectInput("val_indikator", "Indikator", choices = NULL)),
+                  div(selectInput("val_agarkategori", "Ägarkategori", choices = NULL)),
+                  div(class = "val-ar", selectInput("val_ar", "År", choices = NULL)),
                   actionButton("geografi_tillbaka", label = NULL, icon = icon("level-up-alt"),
                                class = "btn btn-light", title = "Tillbaka till alla kommuner")
               ),
@@ -95,8 +96,9 @@ shinyUI(
       tabPanel('Jämför områden',
         div(class = "jamfor-layout",
           div(class = "diagram-toolbar",
-              div(selectInput("jmf_indikator", "Indikator", choices = NULL)),
-              div(selectInput("jmf_ar", "År", choices = NULL)),
+              div(class = "val-indikator", selectInput("jmf_indikator", "Indikator", choices = NULL)),
+              div(selectInput("jmf_agarkategori", "Ägarkategori", choices = NULL)),
+              div(class = "val-ar", selectInput("jmf_ar", "År", choices = NULL)),
               div(class = "jamfor-info", textOutput("jmf_info"))
           ),
           fluidRow(
@@ -160,7 +162,8 @@ shinyUI(
             tags$li('Fliken Karta och diagram visar en indikator i karta och diagram, från hela länet ned till enskilda områden.'),
             tags$li(paste0('Fliken Jämför områden visar de ', shb_antal_rangordning, ' områden i länet som har högst respektive
                      lägst värde, och en tabell med alla områden där du kan söka efter ett område.')),
-            tags$li('Välj indikator och år ovanför diagrammen.'),
+            tags$li('Välj indikator, ägarkategori och år ovanför diagrammen. Ägarkategorin visar om det gäller alla bostäder
+                     (Totalt), allmännyttans bostäder eller bostäder med övriga ägare.'),
             tags$li('Figurer markerade med handikonen går att klicka i.'),
             tags$li('Klicka på en kommun i kartan eller i stapeldiagrammet för att se kommunens områden.'),
             tags$li('Det nedre diagrammet visar alla områden i länet, grupperade per kommun. Strecken visar kommunens värde.
@@ -169,10 +172,15 @@ shinyUI(
             tags$li('För att spara ett diagram, för muspekaren över diagrammet och klicka på ikonen högst upp till höger.')
           ),
 
-          h4('Små områden'),
-          p(paste0('I små områden kan en eller ett par personer påverka en andel mycket. Områden där andelen räknas på färre än ',
-                   shb_min_namnare, ' personer tas därför inte med när områdena rangordnas. De finns med i kartan, diagrammen och tabellen, där
-                   det också framgår hur många personer andelen bygger på.')),
+          h4('Sekretess'),
+          p('Statistiken bygger på uppgifter om enskilda personer och hushåll. För att ingen ska kunna pekas ut gäller följande:'),
+          tags$ul(
+            tags$li(paste0('Områden med färre än ', shb_min_befolkning_omrade, ' invånare visas inte.')),
+            tags$li(paste0('Andelar som bygger på färre än ', shb_min_grupp, ' personer (eller hushåll), och antal under ',
+                           shb_min_grupp, ', visas inte. Då visas varken andelen eller de antal den räknas fram från.'))
+          ),
+          p(paste0('I små grupper kan en eller ett par personer påverka en andel mycket. Andelar som bygger på färre än ',
+                   shb_min_rangordning, ' personer ingår därför inte när områdena rangordnas, men visas i kartan, diagrammen och tabellen.')),
 
           h4('Kontakt'),
           p('Samhällsanalys, Region Dalarna, ',

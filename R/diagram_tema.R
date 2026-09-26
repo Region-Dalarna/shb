@@ -72,9 +72,15 @@ formatera_tal <- function(x) {
   vapply(x, function(v) format(v, big.mark = " ", decimal.mark = ",", scientific = FALSE), character(1))
 }
 
-# Andelar visas som "34,5 % (120 av 348)", rena antal som "120"
-formatera_varde <- function(varde, taljare, namnare) {
-  ifelse(is.na(varde), "Uppgift saknas",
-         ifelse(is.na(namnare), formatera_tal(varde),
-                paste0(formatera_tal(varde), " % (", formatera_tal(taljare), " av ", formatera_tal(namnare), ")")))
+# Andelar visas som "34,5 % (120 av 348 personer)", antal som "912 personer" och
+# sekretessgranskade värden med sin kommentar, t.ex. "Visas inte: färre än 30 personer"
+formatera_varde <- function(varde, taljare, namnare, enhet, kommentar = NA_character_) {
+  enhet <- tolower(enhet)
+  case_when(
+    !is.na(kommentar) ~ kommentar,
+    is.na(varde)      ~ "Uppgift saknas",
+    is.na(namnare)    ~ paste0(formatera_tal(varde), " ", enhet),
+    TRUE              ~ paste0(formatera_tal(varde), " % (", formatera_tal(taljare), " av ",
+                               formatera_tal(namnare), " ", enhet, ")")
+  )
 }

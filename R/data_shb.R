@@ -28,79 +28,129 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
     select(omradeskod, omradesnamn, kommunkod, kommunnamn)
 }
 
-# Statistiken förväntas i långt format med en rad per geografi, år och indikator:
+# Statistiken ligger i långt format med en rad per geografi, år, ägarkategori och indikator:
 #
-#   regionkod  chr  "00" för riket, "20" för Dalarna eller kommunkod (4 siffror)
-#   omrade     chr  områdets namn som i shb_omraden, NA för rader som gäller hela regionen
-#   ar         int  år
-#   indikator  chr  indikatorns namn
-#   taljare    dbl  antal
-#   namnare    dbl  antal i gruppen som andelen räknas på, NA om indikatorn är ett rent antal
+#   ar              int  år
+#   regionkod       chr  "00" för riket, "20" för Dalarna eller kommunkod (4 siffror, även för områden)
+#   omrade          chr  områdets namn som i shb_omraden, NA för rader som gäller hela regionen
+#   agarkategori    chr  Totalt, Allmännyttan, Övriga ägare eller Uppgift saknas
+#   grupp           chr  indikatorgrupp, t.ex. Huvudindikator eller Bakgrund
+#   indikator       chr  kod, t.ex. ekonomiskt_bistand
+#   indikator_namn  chr  namn som visas i appen
+#   enhet           chr  Personer eller Hushåll
+#   taljare         dbl  antal
+#   namnare         dbl  antal i gruppen som andelen räknas på, NA om indikatorn är ett rent antal
 #
-# Andelar räknas fram i appen som taljare / namnare. Kommuner som saknar egna rader
-# summeras ihop från sina områden, riket och län måste finnas som egna rader.
-hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf) {
+# Alla nivåer (område, kommun, län och riket) ska finnas som egna rader. Övriga kolumner ignoreras.
+hamta_shb_statistik <- function(tabell, kommun_sf, omraden_sf, min_befolkning_omrade, min_grupp) {
 
-  df <- if (is.null(tabell)) {
-    skapa_exempeldata(kommun_sf, omraden_sf)
+  if (is.null(tabell)) {
+    df <- skapa_exempeldata(kommun_sf, omraden_sf)
   } else {
-    tbl(shiny_uppkoppling_las("oppna_data"), dbplyr::in_schema(tabell[1], tabell[2])) %>%
-      collect()
+    con <- shiny_uppkoppling_las(db_name = tabell$databas, db_user = tabell$anvandare)
+    df <- tbl(con, dbplyr::in_schema(tabell$schema, tabell$tabell)) %>% collect()
+    DBI::dbDisconnect(con)
   }
 
-  df <- df %>%
-    mutate(
-      regionkod = as.character(regionkod),
-      regionkod = ifelse(is.na(omrade), regionkod, omradesnyckel(regionkod, omrade)),
-      ar = as.integer(ar),
-      across(c(taljare, namnare), as.numeric)
-    ) %>%
-    select(regionkod, ar, indikator, taljare, namnare)
-
-  # kommuner som saknas summeras från sina områden
-  kommun_fran_omraden <- df %>%
-    inner_join(st_drop_geometry(omraden_sf) %>% select(omradeskod, kommunkod), by = c("regionkod" = "omradeskod")) %>%
-    group_by(regionkod = kommunkod, ar, indikator) %>%
-    summarise(taljare = sum(taljare), namnare = sum(namnare), .groups = "drop") %>%
-    anti_join(df, by = c("regionkod", "ar", "indikator"))
-
-  resultat <- bind_rows(df, kommun_fran_omraden) %>%
-    mutate(varde = ifelse(is.na(namnare), taljare, round(taljare / namnare * 100, 1)))
-
+  resultat <- forbered_shb_statistik(df, min_befolkning_omrade, min_grupp)
   attr(resultat, "exempeldata") <- is.null(tabell)
   resultat
 }
 
-# Enhet per indikator: "procent" om den har nämnare, annars "antal"
-indikatorenhet <- function(df, vald_indikator) {
-  if (all(is.na(df$namnare[df$indikator == vald_indikator]))) "antal" else "procent"
+# Gör statistiken redo för appen och sekretessgranskar den. Allt som visas eller kan laddas ned
+# i appen kommer härifrån, så värden som släcks här når aldrig webbläsaren.
+#
+# Sekretessregler:
+#   - områden där den totala befolkningen är färre än min_befolkning_omrade visas inte alls
+#   - andelar där nämnaren är färre än min_grupp, och antal under min_grupp, visas inte
+# Släckta värden får en kommentar som visas i stället för värdet.
+forbered_shb_statistik <- function(df, min_befolkning_omrade, min_grupp, befolkning_indikator = "befolkning") {
+  df <- df %>%
+    mutate(
+      ar_omrade = !is.na(omrade),
+      regionkod = as.character(regionkod),
+      regionkod = ifelse(ar_omrade, omradesnyckel(regionkod, omrade), regionkod),
+      ar = as.integer(ar),
+      across(c(taljare, namnare), as.numeric)
+    ) %>%
+    # Rader utan värde, t.ex. köpkraft för år där uppgiften inte finns. Då går året inte heller att välja.
+    filter(!is.na(taljare), is.na(namnare) | namnare > 0) %>%
+    # Andel eller antal avgörs per indikator innan värden släcks
+    group_by(indikator) %>%
+    mutate(typ = if (any(!is.na(namnare))) "andel" else "antal") %>%
+    ungroup()
+
+  # Varje områdes totala befolkning samma år
+  befolkning <- df %>%
+    filter(indikator == befolkning_indikator, agarkategori == "Totalt") %>%
+    select(regionkod, ar, total_befolkning = taljare)
+
+  df %>%
+    left_join(befolkning, by = c("regionkod", "ar")) %>%
+    mutate(
+      kommentar = case_when(
+        ar_omrade & total_befolkning < min_befolkning_omrade ~
+          paste0("Visas inte: området har färre än ", min_befolkning_omrade, " invånare"),
+        typ == "andel" & namnare < min_grupp ~ paste0("Visas inte: färre än ", min_grupp, " ", tolower(enhet)),
+        typ == "antal" & taljare < min_grupp ~ paste0("Visas inte: färre än ", min_grupp, " ", tolower(enhet)),
+        TRUE ~ NA_character_
+      ),
+      skyddad = !is.na(kommentar),
+      taljare = if_else(skyddad, NA_real_, taljare),
+      namnare = if_else(skyddad, NA_real_, namnare),
+      varde = case_when(skyddad ~ NA_real_,
+                        typ == "antal" ~ taljare,
+                        TRUE ~ round(taljare / namnare * 100, 1))
+    ) %>%
+    select(regionkod, ar, agarkategori, grupp, indikator, indikator_namn, enhet, typ,
+           taljare, namnare, varde, skyddad, kommentar)
 }
 
-# Slumpade värden i rätt format, används tills riktig statistik finns i databasen.
-# Bara områden, Dalarna och riket - kommunerna summeras ihop i hamta_shb_statistik().
+# Slumpade värden i samma format som den riktiga tabellen, används när shb_stat_tabell är NULL
 skapa_exempeldata <- function(kommun_sf, omraden_sf) {
   set.seed(20)
 
-  omraden <- st_drop_geometry(omraden_sf) %>%
-    select(regionkod = kommunkod, omrade = omradesnamn)
+  indikatorer <- tribble(
+    ~grupp,           ~indikator,           ~indikator_namn,                                    ~enhet,     ~typ,
+    "Huvudindikator", "ekonomiskt_bistand", "Ekonomiskt bistånd minst sex månader, 18–64 år",   "Personer", "andel",
+    "Huvudindikator", "trangbodda",         "Trångbodda enligt norm 3",                          "Hushåll",  "andel",
+    "Bakgrund",       "befolkning",         "Befolkning",                                        "Personer", "antal"
+  )
 
-  df_omr <- expand_grid(omraden, ar = 2018:2025, indikator = c("Exempelindikator A", "Exempelindikator B")) %>%
-    group_by(regionkod, omrade, indikator) %>%
+  omraden <- st_drop_geometry(omraden_sf) %>% select(regionkod = kommunkod, omrade = omradesnamn)
+
+  df_omr <- expand_grid(omraden, ar = 2022:2024, agarkategori = c("Allmännyttan", "Övriga ägare"), indikatorer) %>%
+    group_by(regionkod, omrade, agarkategori, indikator) %>%
     mutate(
-      namnare = round(runif(1, 200, 3000) * (1 + cumsum(rnorm(n(), 0, 0.02)))),
-      taljare = round(namnare * pmin(pmax(runif(1, 0.1, 0.6) + cumsum(rnorm(n(), 0, 0.02)), 0), 1))
+      bas = round(runif(1, 10, 2500) * (1 + cumsum(rnorm(n(), 0, 0.02)))),
+      namnare = if_else(typ == "andel", bas, NA_real_),
+      taljare = if_else(typ == "andel", round(bas * pmin(pmax(runif(1, 0.02, 0.4) + cumsum(rnorm(n(), 0, 0.01)), 0), 1)), bas)
     ) %>%
-    ungroup()
+    ungroup() %>%
+    select(-bas)
 
-  df_lan <- df_omr %>%
-    group_by(ar, indikator) %>%
-    summarise(taljare = sum(taljare), namnare = sum(namnare), .groups = "drop") %>%
-    mutate(regionkod = "20", omrade = NA_character_)
+  summera <- function(df, ...) {
+    df %>%
+      group_by(..., ar, agarkategori, grupp, indikator, indikator_namn, enhet, typ) %>%
+      summarise(taljare = sum(taljare), namnare = sum(namnare), .groups = "drop")
+  }
 
-  df_riket <- df_lan %>%
-    mutate(regionkod = "00", namnare = namnare * 35, taljare = round(taljare * 35 * runif(n(), 0.9, 1.1)))
+  df_kommun <- summera(df_omr, regionkod)
+  df_lan    <- summera(df_omr) %>% mutate(regionkod = "20")
+  df_riket  <- df_lan %>% mutate(regionkod = "00", taljare = round(taljare * 35 * runif(n(), 0.9, 1.1)), namnare = namnare * 35)
 
-  bind_rows(df_omr, df_lan, df_riket)
+  alla <- bind_rows(df_omr, df_kommun, df_lan, df_riket)
+  totalt <- summera(alla, regionkod, omrade) %>% mutate(agarkategori = "Totalt")
+
+  bind_rows(alla, totalt)
+}
+
+# Indikatorerna i den ordning de visas i listrutan: huvudindikatorer först
+skapa_indikatorlista <- function(statistik) {
+  statistik %>%
+    distinct(grupp, indikator, indikator_namn, enhet, typ) %>%
+    mutate(grupp = factor(grupp, levels = unique(c("Huvudindikator", sort(unique(grupp)))))) %>%
+    arrange(grupp, indikator_namn)
 }
 
 # Namn och nivå för alla geografier, för att sätta namn på statistiken

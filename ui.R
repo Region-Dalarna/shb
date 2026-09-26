@@ -172,6 +172,11 @@ shinyUI(
             tags$li('För att spara ett diagram, för muspekaren över diagrammet och klicka på ikonen högst upp till höger.')
           ),
 
+          h4('Områdesindelningen'),
+          p('I några kommuner täcker shb-områdena inte hela kommunen, till exempel där bara centralorten är indelad.
+             Delar av en kommun som inte ingår i något område visas vita i kartan. Invånarna där räknas med i kommunens,
+             länets och rikets värden men visas inte som ett eget område. Gagnef är inte indelad i shb-områden.'),
+
           h4('Sekretess'),
           p('Statistiken bygger på uppgifter om enskilda personer och hushåll. För att ingen ska kunna pekas ut gäller följande:'),
           tags$ul(

@@ -11,6 +11,7 @@ farg_lan         <- "#54a1bd"
 farg_riket       <- "#8edded"
 farg_ungefarlig  <- "#a9cbe6"      # staplar och punkter med ungefärligt värde (färre än 5), ritade vid gränsen
 farg_ungefarlig_karta <- "#cccccc"
+farg_restyta     <- "#ffffff"      # del av kommunen som inte ingår i något shb-område
 
 # Svenska texter till tabellen (DataTables)
 dt_svenska <- list(
@@ -27,7 +28,8 @@ agarkategorier <- intersect(c("Totalt", "Allmännyttan", "Övriga ägare", "Uppg
                             unique(shb_statistik$agarkategori))
 
 # Kommuner som saknar shb-områden, t.ex. Gagnef
-kommuner_utan_omraden <- setdiff(kommun_sf$kommunkod, shb_omraden_sf$kommunkod)
+kommuner_utan_omraden <- setdiff(kommun_sf$kommunkod, shb_omraden_sf$kommunkod[!shb_omraden_sf$restyta])
+restytor <- shb_omraden_sf$omradeskod[shb_omraden_sf$restyta]
 
 shinyServer(function(input, output, session) {
   rdshinyappar::telemetri_server(telemetry, navigation_id = 'flikval', forsta_flik = 'Karta och diagram')
@@ -118,6 +120,12 @@ shinyServer(function(input, output, session) {
     kommun_sf$kommunnamn[kommun_sf$kommunkod == vald_kommun()]
   })
 
+  # "Moras" för tooltipen på restytor, som bara visas när en kommun är vald
+  vald_kommun_namn_eller_tom <- function() {
+    namn <- if (is.null(vald_kommun())) "kommunens" else vald_kommun_namn()
+    if (grepl("s$", namn)) namn else paste0(namn, "s")
+  }
+
   val_info <- reactive(indikator_info(valt$indikator))
 
   # ---- Data för kartan och geografidiagrammet ----
@@ -126,9 +134,9 @@ shinyServer(function(input, output, session) {
     req(valt$ar)
 
     geo <- if (kartniva() == "kommun") {
-      kommun_sf %>% select(kod = kommunkod, namn = kommunnamn)
+      kommun_sf %>% select(kod = kommunkod, namn = kommunnamn) %>% mutate(restyta = FALSE)
     } else {
-      shb_omraden_sf %>% filter(kommunkod == vald_kommun()) %>% select(kod = omradeskod, namn = omradesnamn)
+      shb_omraden_sf %>% filter(kommunkod == vald_kommun()) %>% select(kod = omradeskod, namn = omradesnamn, restyta)
     }
 
     varden <- urval() %>%
@@ -149,6 +157,8 @@ shinyServer(function(input, output, session) {
       vald_kommun(kod)
       valt_omrade(NULL)
       kartniva("omrade")
+    } else if (kod %in% restytor) {
+      showNotification("Den här delen av kommunen ingår inte i något shb-område.", type = "message", duration = 5)
     } else if (identical(valt_omrade(), kod)) {
       valt_omrade(NULL)
     } else {
@@ -206,7 +216,9 @@ shinyServer(function(input, output, session) {
     doman <- if (any(!is.na(df_map$varde))) df_map$varde else 0
     pal <- colorNumeric(kartpalett, domain = doman, na.color = "transparent")
     df_map$ungefarlig <- df_map$farre_an %in% TRUE | df_map$farre_utan %in% TRUE
-    df_map$fyllning <- ifelse(df_map$ungefarlig, farg_ungefarlig_karta, pal(df_map$varde))
+    df_map$fyllning <- case_when(df_map$restyta ~ farg_restyta,
+                                 df_map$ungefarlig ~ farg_ungefarlig_karta,
+                                 TRUE ~ pal(df_map$varde))
 
     proxy <- leafletProxy("karta_shb", data = df_map) %>%
       clearShapes() %>%
@@ -217,18 +229,22 @@ shinyServer(function(input, output, session) {
       return()
     }
 
-    etiketter <- lapply(paste0(
-      df_map$namn, "<br>",
-      "<b>", urvalstext(), "</b><br>",
-      formatera_varde(df_map$varde, df_map$taljare, df_map$namnare, info$enhet, df_map$kommentar, df_map$varde_max, df_map$varde_min), "<br>",
-      "<i>År ", valt$ar, "</i>"
+    etiketter <- lapply(ifelse(
+      df_map$restyta,
+      paste0("<b>Ingår inte i något shb-område</b><br>", "Invånarna här räknas med i ", vald_kommun_namn_eller_tom(), " värde"),
+      paste0(
+        df_map$namn, "<br>",
+        "<b>", urvalstext(), "</b><br>",
+        formatera_varde(df_map$varde, df_map$taljare, df_map$namnare, info$enhet, df_map$kommentar, df_map$varde_max, df_map$varde_min), "<br>",
+        "<i>År ", valt$ar, "</i>"
+      )
     ), HTML)
 
     proxy %>%
       addPolygons(
         layerId     = ~kod,
         fillColor   = ~fyllning,
-        fillOpacity = 0.6,
+        fillOpacity = ~ifelse(restyta, 0.35, 0.6),
         color       = "#555555",
         weight      = 0.7,
         label       = etiketter,
@@ -240,6 +256,10 @@ shinyServer(function(input, output, session) {
         labFormat = labelFormat(big.mark = " ", suffix = if (info$typ == "andel") " %" else ""),
         className = "info legend kompakt-legend"
       ) %>%
+      { if (any(df_map$restyta)) {
+          addLegend(., "bottomleft", colors = farg_restyta, labels = "Ingår inte i något shb-område",
+                    className = "info legend kompakt-legend")
+        } else . } %>%
       { if (any(df_map$ungefarlig)) {
           addLegend(., "bottomleft", colors = farg_ungefarlig_karta, labels = paste0("Ungefärligt värde (färre än ", shb_min_taljare, ")"),
                     className = "info legend kompakt-legend")

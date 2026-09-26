@@ -51,6 +51,11 @@ shb_min_taljare <- 5
 # eftersom små underlag lätt ger extrema andelar. De visas i kartan, diagrammen och tabellen.
 shb_min_rangordning <- 50
 
+# Restytor i områdesindelningen: den del av en kommun som inte ingår i något namngivet shb-område,
+# t.ex. byarna i Mora. De visas i kartan men räknas inte som områden. Invånarna ingår i kommunens,
+# länets och rikets värden.
+shb_restyta_namn <- "Uppgift saknas"
+
 # Ägarkategori som är förvald
 shb_agarkategori_standard <- "Totalt"
 
@@ -73,7 +78,8 @@ shb_omraden_sf <- hamta_shb_omraden(shiny_uppkoppling_las("geodata"), kommun_sf,
 
 # ---- 3. Läs in statistik ----
 
-shb_statistik <- hamta_shb_statistik(shb_stat_tabell, kommun_sf, shb_omraden_sf, shb_min_befolkning_omrade, shb_min_grupp, shb_min_taljare)
+shb_statistik <- hamta_shb_statistik(shb_stat_tabell, kommun_sf, shb_omraden_sf, shb_min_befolkning_omrade, shb_min_grupp, shb_min_taljare) %>%
+  filter(!endsWith(regionkod, paste0("_", shb_restyta_namn)))              # restytornas egna rader visas inte
 shb_exempeldata <- isTRUE(attr(shb_statistik, "exempeldata"))
 shb_indikatorer <- skapa_indikatorlista(shb_statistik)
 geografinamn <- skapa_geografinamn(kommun_sf, shb_omraden_sf)

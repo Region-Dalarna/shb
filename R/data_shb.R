@@ -25,7 +25,8 @@ hamta_shb_omraden <- function(con, kommun_sf, kol) {
            omradeskod = omradesnyckel(kommunkod, omradesnamn)) %>%
     filter(kommunkod %in% kommun_sf$kommunkod) %>%
     left_join(st_drop_geometry(kommun_sf), by = "kommunkod") %>%
-    select(omradeskod, omradesnamn, kommunkod, kommunnamn)
+    mutate(restyta = omradesnamn == shb_restyta_namn) %>%
+    select(omradeskod, omradesnamn, kommunkod, kommunnamn, restyta)
 }
 
 # Statistiken ligger i långt format med en rad per geografi, år, ägarkategori och indikator:

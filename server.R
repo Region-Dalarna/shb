@@ -11,20 +11,52 @@ farg_kommun      <- "#0f7090"
 farg_lan         <- "#54a1bd"
 farg_riket       <- "#8edded"
 
+# Svenska texter till tabellen (DataTables)
+dt_svenska <- list(
+  search = "Sök:", lengthMenu = "Visa _MENU_ rader", zeroRecords = "Inga områden matchar sökningen",
+  info = "Visar _START_–_END_ av _TOTAL_ områden", infoEmpty = "Inga områden", infoFiltered = "(filtrerat från _MAX_)",
+  paginate = list(first = "Första", last = "Sista", `next` = "Nästa", previous = "Föregående")
+)
+
 shinyServer(function(input, output, session) {
-  rdshinyappar::telemetri_server(telemetry, navigation_id = 'flikval', forsta_flik = 'Statistik')
+  rdshinyappar::telemetri_server(telemetry, navigation_id = 'flikval', forsta_flik = 'Karta och diagram')
 
   kartniva     <- reactiveVal("kommun")         # "kommun" = alla kommuner, "omrade" = shb-områden i vald kommun
   vald_kommun  <- reactiveVal(NULL)             # kommunkod
   valt_omrade  <- reactiveVal(NULL)             # omradeskod, markeras i karta och diagram
 
   # ---- Val av indikator och år ----
-  updateSelectInput(session, "val_indikator", choices = sort(unique(shb_statistik$indikator)))
+  # Flikarna har egna listrutor (val_* och jmf_*) men visar alltid samma indikator och år
+  indikatorer <- sort(unique(shb_statistik$indikator))
+  updateSelectInput(session, "val_indikator", choices = indikatorer)
+  updateSelectInput(session, "jmf_indikator", choices = indikatorer)
 
   observeEvent(input$val_indikator, {
+    req(input$val_indikator)
     ar <- shb_statistik %>% filter(indikator == input$val_indikator) %>% pull(ar) %>% unique() %>% sort(decreasing = TRUE)
     valt <- if (isTruthy(input$val_ar) && input$val_ar %in% ar) input$val_ar else ar[1]
     updateSelectInput(session, "val_ar", choices = ar, selected = valt)
+    updateSelectInput(session, "jmf_ar", choices = ar, selected = valt)
+    if (!identical(input$jmf_indikator, input$val_indikator)) {
+      updateSelectInput(session, "jmf_indikator", selected = input$val_indikator)
+    }
+  })
+
+  observeEvent(input$jmf_indikator, {
+    req(input$jmf_indikator)
+    if (!identical(input$jmf_indikator, input$val_indikator)) {
+      updateSelectInput(session, "val_indikator", selected = input$jmf_indikator)
+    }
+  })
+
+  observeEvent(input$val_ar, {
+    req(input$val_ar)
+    if (!identical(input$jmf_ar, input$val_ar)) updateSelectInput(session, "jmf_ar", selected = input$val_ar)
+  })
+
+  observeEvent(input$jmf_ar, {
+    req(input$jmf_ar)
+    if (!identical(input$jmf_ar, input$val_ar)) updateSelectInput(session, "val_ar", selected = input$jmf_ar)
   })
 
   vald_kommun_namn <- reactive({
@@ -196,6 +228,9 @@ shinyServer(function(input, output, session) {
     }
     storlek <- diagram_storlek(session, "diagram_geografi")
 
+    # Med många områden blir namnen på x-axeln oläsliga, då visas de bara vid hovring
+    manga <- nrow(df_diag) > 25
+
     p <- ggplot(df_diag, aes(x = reorder(namn, varde), y = varde)) +
       geom_col_interactive(aes(tooltip = etikett, data_id = kod, fill = farg), color = NA) +
       scale_fill_identity() +
@@ -203,7 +238,9 @@ shinyServer(function(input, output, session) {
       scale_x_discrete(labels = function(x) str_trunc(x, 20)) +
       labs(x = NULL, y = enhet_text(), title = radbryt(titel, storlek$width), caption = KALLA_TEXT) +
       tema_diagram() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = if (nrow(df_diag) > 30) 7 else diagram_axeltext_storlek),
+      labs(subtitle = if (manga) "Håll muspekaren över en stapel för att se områdets namn") +
+      theme(axis.text.x = if (manga) element_blank() else element_text(angle = 45, hjust = 1),
+            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"),
             legend.position = "none")
 
     skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
@@ -325,6 +362,139 @@ shinyServer(function(input, output, session) {
       kartniva("omrade")
       valt_omrade(kod)
     }
+  })
+
+  # ---- Fliken Jämför områden ----
+
+  # Visa ett område i kartfliken: byt flik först så att kartan är synlig när den zoomar
+  visa_i_kartan <- function(kod) {
+    kommunkod <- shb_omraden_sf$kommunkod[shb_omraden_sf$omradeskod == kod][1]
+    req(kommunkod)
+    updateTabsetPanel(session, "flikval", selected = "Karta och diagram")
+    vald_kommun(kommunkod)
+    kartniva("omrade")
+    valt_omrade(kod)
+  }
+
+  # Alla områden med värde för vald indikator och år
+  rangordning <- reactive({
+    req(input$jmf_indikator, input$jmf_ar)
+    st_drop_geometry(shb_omraden_sf) %>%
+      inner_join(shb_statistik %>% filter(indikator == input$jmf_indikator, ar == as.integer(input$jmf_ar)),
+                 by = c("omradeskod" = "regionkod")) %>%
+      filter(!is.na(varde)) %>%
+      mutate(litet_underlag = !is.na(namnare) & namnare < shb_min_namnare)
+  })
+
+  jmf_enhet <- reactive({
+    req(input$jmf_indikator)
+    indikatorenhet(shb_statistik, input$jmf_indikator)
+  })
+
+  output$jmf_info <- renderText({
+    antal_sma <- sum(rangordning()$litet_underlag)
+    if (antal_sma == 0) return("")
+    paste0(antal_sma, " av ", nrow(rangordning()), " områden bygger på färre än ", shb_min_namnare,
+           " personer och ingår inte i rangordningen.")
+  })
+
+  rangordningsdiagram <- function(output_id, hogst) {
+    df <- rangordning() %>%
+      filter(!litet_underlag) %>%
+      arrange(if (hogst) desc(varde) else varde) %>%
+      slice_head(n = shb_antal_rangordning)
+
+    validate(need(nrow(df) > 0, "Inga data för valt urval"))
+
+    df <- df %>%
+      mutate(
+        axeltext = paste0(str_trunc(omradesnamn, 35), " (", kommunnamn, ")"),
+        axeltext = factor(axeltext, levels = rev(unique(axeltext))),        # första området överst
+        etikett = paste0(omradesnamn, ", ", kommunnamn, "<br>", formatera_varde(varde, taljare, namnare))
+      )
+
+    dalarna <- shb_statistik %>%
+      filter(regionkod == "20", indikator == input$jmf_indikator, ar == as.integer(input$jmf_ar))
+
+    storlek <- diagram_storlek(session, output_id)
+    enhet_ord <- if (jmf_enhet() == "procent") "andel" else "antal"
+    titel <- paste0("De ", nrow(df), " områden med ", if (hogst) "högst " else "lägst ", enhet_ord,
+                    ": ", input$jmf_indikator, " år ", input$jmf_ar)
+
+    p <- ggplot(df, aes(x = varde, y = axeltext)) +
+      geom_col_interactive(aes(tooltip = etikett, data_id = omradeskod), fill = farg_stapel, width = 0.75) +
+      scale_x_continuous(labels = formatera_tal, expand = expansion(mult = c(0, 0.05))) +
+      labs(x = if (jmf_enhet() == "procent") "Andel (%)" else "Antal", y = NULL,
+           title = radbryt(titel, storlek$width), caption = KALLA_TEXT) +
+      tema_diagram() +
+      theme(panel.grid.major.y = element_blank(), legend.position = "none")
+
+    # Dalarna som referens bara för andelar, länets totala antal går inte att jämföra med ett område
+    if (enhet_ord == "andel" && nrow(dalarna) == 1 && !is.na(dalarna$varde)) {
+      p <- p +
+        geom_vline_interactive(xintercept = dalarna$varde, color = farg_kommun, linetype = "dashed", linewidth = 0.8,
+                               tooltip = paste0("Dalarna<br>", formatera_varde(dalarna$varde, dalarna$taljare, dalarna$namnare))) +
+        labs(subtitle = paste0("Streckad linje: Dalarna ", formatera_tal(dalarna$varde), " %")) +
+        theme(plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = farg_kommun))
+    }
+
+    skapa_girafe(p, klickbar = TRUE, width = storlek$width, height = storlek$height)
+  }
+
+  output$diagram_hogst <- renderGirafe(rangordningsdiagram("diagram_hogst", hogst = TRUE))
+  output$diagram_lagst <- renderGirafe(rangordningsdiagram("diagram_lagst", hogst = FALSE))
+
+  observeEvent(input$diagram_hogst_selected, {
+    session$sendCustomMessage(type = "diagram_hogst_set", message = character(0))
+    visa_i_kartan(input$diagram_hogst_selected)
+  })
+
+  observeEvent(input$diagram_lagst_selected, {
+    session$sendCustomMessage(type = "diagram_lagst_set", message = character(0))
+    visa_i_kartan(input$diagram_lagst_selected)
+  })
+
+  # Tabell med alla områden, sorterad med högst värde först
+  tabell_data <- reactive({
+    rangordning() %>%
+      arrange(desc(varde)) %>%
+      mutate(kommentar = ifelse(litet_underlag,
+                                paste0("Färre än ", shb_min_namnare, " personer, ingår inte i rangordningen"), ""))
+  })
+
+  output$tabell_omraden <- renderDT({
+    df <- tabell_data()
+    procent <- jmf_enhet() == "procent"
+
+    visning <- if (procent) {
+      df %>% transmute(Kommun = kommunnamn, `Område` = omradesnamn, `Andel (%)` = varde,
+                       `Täljare` = taljare, `Nämnare` = namnare, Kommentar = kommentar)
+    } else {
+      df %>% transmute(Kommun = kommunnamn, `Område` = omradesnamn, Antal = varde)
+    }
+
+    tabell <- datatable(
+      visning,
+      rownames = FALSE,
+      selection = "single",
+      class = "compact stripe hover",
+      options = list(pageLength = 15, lengthMenu = c(15, 50, 100), order = list(list(2, "desc")),
+                     language = dt_svenska)
+    )
+
+    if (procent) {
+      tabell %>%
+        formatRound("Andel (%)", digits = 1, mark = " ", dec.mark = ",") %>%
+        formatRound(c("Täljare", "Nämnare"), digits = 0, mark = " ")
+    } else {
+      tabell %>% formatRound("Antal", digits = 0, mark = " ")
+    }
+  })
+
+  observeEvent(input$tabell_omraden_rows_selected, {
+    kod <- tabell_data()$omradeskod[input$tabell_omraden_rows_selected]
+    selectRows(dataTableProxy("tabell_omraden"), NULL)
+    visa_i_kartan(kod)
   })
 
   # ---- Nedladdning ----

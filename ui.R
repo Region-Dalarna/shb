@@ -14,7 +14,7 @@ shinyUI(
       # fada in klick-hint-badgen först när respektive diagram renderats
       tags$script(HTML(
         "$(document).on('shiny:value', function(event) {",
-        "  if (event.name === 'diagram_geografi' || event.name === 'diagram_alla') {",
+        "  if (['diagram_geografi', 'diagram_alla', 'diagram_hogst', 'diagram_lagst'].includes(event.name)) {",
         "    $(event.target).closest('.diagram-cell--klickbar')",
         "      .find('.klick-hint').addClass('klick-hint--synlig');",
         "  }",
@@ -39,7 +39,7 @@ shinyUI(
     # ---- Innehåll ---------------------------------------------------------
     tabsetPanel(
       id = 'flikval',
-      tabPanel('Statistik',
+      tabPanel('Karta och diagram',
         div(class = "karta-layout",
           fluidRow(
             # Vänster: kartan + nedladdningsknappar
@@ -92,6 +92,35 @@ shinyUI(
           )
         )
       ),
+      tabPanel('Jämför områden',
+        div(class = "jamfor-layout",
+          div(class = "diagram-toolbar",
+              div(selectInput("jmf_indikator", "Indikator", choices = NULL)),
+              div(selectInput("jmf_ar", "År", choices = NULL)),
+              div(class = "jamfor-info", textOutput("jmf_info"))
+          ),
+          fluidRow(
+            column(
+              width = 6,
+              div(class = "diagram-cell diagram-cell--klickbar",
+                  div(class = "klick-hint", icon("hand-pointer"), span("Klicka på ett område för att se det i kartan")),
+                  girafeOutput("diagram_hogst", width = "100%", height = "100%")
+              )
+            ),
+            column(
+              width = 6,
+              div(class = "diagram-cell diagram-cell--klickbar",
+                  div(class = "klick-hint", icon("hand-pointer"), span("Klicka på ett område för att se det i kartan")),
+                  girafeOutput("diagram_lagst", width = "100%", height = "100%")
+              )
+            )
+          ),
+          h4(class = "jamfor-rubrik", "Alla områden"),
+          p(class = "jamfor-hjalp", "Sök efter ett område eller en kommun, sortera genom att klicka på en kolumnrubrik
+                                     och klicka på en rad för att se området i kartan."),
+          DTOutput("tabell_omraden")
+        )
+      ),
       tabPanel('Om',
         div(class = "om-text",
           h4('Om rapporten'),
@@ -128,6 +157,9 @@ shinyUI(
 
           h4('Så använder du rapporten'),
           tags$ul(
+            tags$li('Fliken Karta och diagram visar en indikator i karta och diagram, från hela länet ned till enskilda områden.'),
+            tags$li(paste0('Fliken Jämför områden visar de ', shb_antal_rangordning, ' områden i länet som har högst respektive
+                     lägst värde, och en tabell med alla områden där du kan söka efter ett område.')),
             tags$li('Välj indikator och år ovanför diagrammen.'),
             tags$li('Figurer markerade med handikonen går att klicka i.'),
             tags$li('Klicka på en kommun i kartan eller i stapeldiagrammet för att se kommunens områden.'),
@@ -136,6 +168,11 @@ shinyUI(
             tags$li('Klicka på husikonen i kartan eller uppåtpilen ovanför diagrammen för att se alla kommuner igen.'),
             tags$li('För att spara ett diagram, för muspekaren över diagrammet och klicka på ikonen högst upp till höger.')
           ),
+
+          h4('Små områden'),
+          p(paste0('I små områden kan en eller ett par personer påverka en andel mycket. Områden där andelen räknas på färre än ',
+                   shb_min_namnare, ' personer tas därför inte med när områdena rangordnas. De finns med i kartan, diagrammen och tabellen, där
+                   det också framgår hur många personer andelen bygger på.')),
 
           h4('Kontakt'),
           p('Samhällsanalys, Region Dalarna, ',

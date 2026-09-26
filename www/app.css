@@ -229,3 +229,44 @@
   color: #666;
   font-size: 14px;
 }
+
+/* ---- Fliken Jämför områden ---- */
+.jamfor-layout .diagram-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-height: 50px;
+  max-width: 1100px;
+}
+.jamfor-layout .diagram-toolbar > div { flex: 1; min-width: 0; }
+.jamfor-layout .diagram-toolbar .form-group { margin-bottom: 0; }
+.jamfor-layout .jamfor-info {
+  flex: 2 !important;
+  font-size: 12px;
+  color: #555;
+  padding-bottom: 8px;
+}
+.jamfor-layout .row { margin-left: -4px; margin-right: -4px; }
+.jamfor-layout .col-sm-6 { padding-left: 4px !important; padding-right: 4px !important; }
+.jamfor-layout .diagram-cell {
+  height: 48vh;
+  min-height: 360px;
+}
+.jamfor-layout .diagram-cell .girafe_container_std,
+.jamfor-layout .diagram-cell .html-widget {
+  height: 100% !important;
+  width: 100% !important;
+}
+.jamfor-layout .diagram-cell--klickbar .html-widget {
+  height: calc(100% - 22px) !important;
+}
+.jamfor-layout .jamfor-rubrik { margin-top: 24px; }
+.jamfor-layout .jamfor-hjalp { font-size: 13px; color: #555; }
+.jamfor-layout .dataTables_wrapper { font-size: 13px; }
+.jamfor-layout table.dataTable tbody tr { cursor: pointer; }
+
+@media (max-width: 991px) {
+  .jamfor-layout .col-sm-6 { width: 100%; }
+  .jamfor-layout .diagram-cell { height: 50vh; margin-bottom: 12px; }
+}

@@ -40,6 +40,13 @@ shb_kol <- list(
 # Förväntat format, se R/data_shb.R.
 shb_stat_tabell <- NULL
 
+# Områden med färre personer än så här i nämnaren tas inte med i rangordningen
+# (högst och lägst andel), eftersom små underlag lätt ger extrema andelar
+shb_min_namnare <- 50
+
+# Antal områden i listorna över högst och lägst värde
+shb_antal_rangordning <- 15
+
 # Källrad längst ner i diagrammen, skrivs ut precis som den står här
 KALLA_SHB <- "Källa: Dalarnas mikrodatabas (SCB), bearbetning av Samhällsanalys, Region Dalarna"
 

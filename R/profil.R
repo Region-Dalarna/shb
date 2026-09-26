@@ -90,7 +90,7 @@ kort_varde <- function(varde_lag, varde_hog, t_lag, t_hog, namnare, kommentar, m
 
 # Litet linjediagram som inbyggd SVG: området (med intervall för ungefärliga värden) och Dalarna över tid.
 # Byggs som text i stället för med ggplot, så att många kort kan visas utan att sidan blir långsam.
-# Punkterna har <title>, som webbläsaren visar som tooltip.
+# Varje år har en osynlig träffyta i full höjd med tooltiptext i data-tips, som visas av JavaScript i ui.R.
 linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omrade, farg_dalarna,
                              bredd = 220, hojd = 56, marginal = 5) {
   varden <- c(omrade$varde_lag, omrade$varde_hog, dalarna$mitt)
@@ -118,6 +118,19 @@ linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omra
   omr <- omrade %>% filter(!is.na(mitt))
   intervall <- omr %>% filter(ungefarlig)
 
+  # Träffytor: en kolumn per år, så att man inte behöver pricka punkten
+  alla_ar <- ar_min:ar_max
+  steg <- if (ar_max > ar_min) (bredd - 2 * marginal) / (ar_max - ar_min) else bredd
+  tips <- vapply(alla_ar, function(a) {
+    o <- omrade %>% filter(ar == a)
+    d <- dalarna %>% filter(ar == a)
+    htmltools::htmlEscape(paste0(
+      "<b>", a, "</b><br>Området: ", if (nrow(o) == 1) o$text else "Uppgift saknas",
+      if (nrow(d) == 1) paste0("<br>Dalarna: ", d$text) else ""), attribute = TRUE)
+  }, character(1))
+  traffytor <- paste(sprintf('<rect x="%.1f" y="0" width="%.1f" height="%s" class="kort-traff" data-tips="%s"/>',
+                             xs(alla_ar) - steg / 2, steg, hojd, tips), collapse = "")
+
   paste0(
     sprintf('<svg viewBox="0 0 %s %s" class="kort-linje" role="img" aria-label="Utveckling över tid">', bredd, hojd),
     if (ar_max > ar_min) sprintf('<line x1="%.1f" x2="%.1f" y1="0" y2="%s" class="kort-valt-ar"/>', x(valt_ar), x(valt_ar), hojd) else "",
@@ -125,11 +138,10 @@ linjediagram_svg <- function(omrade, dalarna, valt_ar, ar_min, ar_max, farg_omra
     linje(omrade, farg_omrade, 2),
     paste(sprintf('<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" stroke="%s" stroke-width="4" stroke-opacity="0.3"/>',
                   xs(intervall$ar), xs(intervall$ar), y(intervall$varde_lag), y(intervall$varde_hog), farg_omrade), collapse = ""),
-    paste(sprintf('<circle cx="%.1f" cy="%.1f" r="%s" fill="%s"><title>%s: %s</title></circle>',
-                  xs(omr$ar), y(omr$mitt), ifelse(omr$ar == valt_ar, 3.5, 2), ifelse(omr$ungefarlig, "#fff", farg_omrade),
-                  omr$ar, htmltools::htmlEscape(omr$text)), collapse = ""),
-    paste(sprintf('<circle cx="%.1f" cy="%.1f" r="%s" fill="none" stroke="%s" stroke-width="1.5"/>',
-                  xs(omr$ar[omr$ungefarlig]), y(omr$mitt[omr$ungefarlig]), 2, farg_omrade), collapse = ""),
+    paste(sprintf('<circle cx="%.1f" cy="%.1f" r="%s" fill="%s" stroke="%s" stroke-width="%s"/>',
+                  xs(omr$ar), y(omr$mitt), ifelse(omr$ar == valt_ar, 3.5, 2),
+                  ifelse(omr$ungefarlig, "#fff", farg_omrade), farg_omrade, ifelse(omr$ungefarlig, 1.5, 0)), collapse = ""),
+    traffytor,
     "</svg>"
   )
 }

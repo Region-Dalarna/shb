@@ -197,13 +197,32 @@ shb_indikatorrubriker <- c(
   ink_studier               = "Andel 18–64 år med studier som huvudsaklig inkomstkälla"
 )
 
+# Om ett högt värde är ogynnsamt ("negativ") eller gynnsamt ("positiv") för området. Styr om
+# förändringen över tid visas i rött (ogynnsam utveckling) eller grönt (gynnsam) i områdesprofilen.
+# Indikatorer som inte finns här, t.ex. ålder, kön och hyresrätt, är neutrala och färgas inte.
+shb_indikatorriktning <- c(
+  ekonomiskt_bistand        = "negativ",
+  langtidsarbetslosa        = "negativ",
+  lagutbildade              = "negativ",
+  trangbodda                = "negativ",
+  lag_kopkraft              = "negativ",
+  ink_arbetsloshet          = "negativ",
+  ink_ekonomiskt_bistand    = "negativ",
+  ink_nedsatt_arbetsformaga = "negativ",
+  ink_saknar_inkomst        = "negativ",
+  ink_sjukdom               = "negativ",
+  ink_arbete                = "positiv",
+  hog_kopkraft              = "positiv"
+)
+
 # Indikatorerna i den ordning de visas i listrutan: huvudindikatorer först
 skapa_indikatorlista <- function(statistik) {
   statistik %>%
     distinct(grupp, indikator, indikator_namn, enhet, typ) %>%
     mutate(
       grupp = factor(grupp, levels = unique(c("Huvudindikator", sort(unique(grupp))))),
-      indikator_rubrik = coalesce(unname(shb_indikatorrubriker[indikator]), indikator_namn)
+      indikator_rubrik = coalesce(unname(shb_indikatorrubriker[indikator]), indikator_namn),
+      riktning = unname(shb_indikatorriktning[indikator])
     ) %>%
     arrange(grupp, indikator_namn)
 }

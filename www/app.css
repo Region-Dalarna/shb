@@ -363,7 +363,7 @@
 .kort-forklaring .forklaring-dalarna::before {
   content: ""; display: inline-block; width: 18px; height: 3px; margin-right: 5px; vertical-align: middle;
 }
-.kort-forklaring .forklaring-omrade::before { background: #e31a1c; }
+.kort-forklaring .forklaring-omrade::before { background: #6a3d9a; }
 .kort-forklaring .forklaring-dalarna::before { background: #54a1bd; height: 2px; }
 
 /* Indikatorkort i ett rutnät som anpassar antalet kolumner efter skärmen */
@@ -381,7 +381,12 @@
   flex-direction: column;
 }
 .kort-namn { font-size: 13px; font-weight: 600; color: #333; line-height: 1.25; min-height: 2.5em; overflow-wrap: anywhere; }
-.kort-varde { font-size: 24px; font-weight: 600; color: #e31a1c; margin-top: 4px; line-height: 1.2; }
+.kort-varde { font-size: 24px; font-weight: 600; color: #222; margin-top: 4px; line-height: 1.2; }
+/* Dolda och saknade värden tonas ned så att de inte tar över kortet */
+.kort-varde.kort-varde--saknas { font-size: 14px; font-weight: 500; color: #888; padding: 6px 0 5px 0; }
+/* Förändring över tid: rött för ogynnsam och grönt för gynnsam utveckling, annars grått */
+.kort-forandring--ogynnsam { color: #c62828 !important; font-weight: 600; }
+.kort-forandring--gynnsam { color: #2e7d32 !important; font-weight: 600; }
 .kort-forandring { font-size: 11px; color: #666; min-height: 1.3em; }
 .kort-referenser { display: flex; gap: 10px; margin: 6px 0 4px 0; }
 .kort-ref { flex: 1; min-width: 0; }
@@ -389,7 +394,24 @@
 .kort-ref-varde { font-size: 13px; color: #333; font-weight: 500; white-space: nowrap; }
 .kort-linje { width: 100%; height: auto; margin-top: 4px; overflow: visible; }
 .kort-linje .kort-valt-ar { stroke: #bbb; stroke-width: 1; stroke-dasharray: 2 2; }
-.kort-linje circle { cursor: default; }
+.kort-linje .kort-traff { fill: transparent; cursor: crosshair; }
+.kort-linje .kort-traff:hover { fill: rgba(0, 0, 0, 0.05); }
+
+/* Tooltip för korten, visas direkt vid hovring (se JavaScript i ui.R) */
+#kort-tooltip {
+  position: fixed;
+  z-index: 3000;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 280px;
+  display: none;
+}
 .kort-axel { display: flex; justify-content: space-between; font-size: 10px; color: #888; }
 
 @media (max-width: 991px) {

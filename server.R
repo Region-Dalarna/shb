@@ -3,7 +3,7 @@ KALLA_TEXT <- if (shb_exempeldata) "Exempeldata – slumpade värden, inte rikti
 # Färger som i brott-appen
 kartpalett       <- "YlOrRd"
 farg_stapel      <- "#3182bd"
-farg_vald        <- "#e31a1c"      # valt område i diagrammen
+farg_vald        <- "#6a3d9a"      # valt område i diagrammen och korten. Inte rött, som är reserverat för ogynnsam utveckling
 farg_markering   <- "#1f1f1f"      # kontur runt valt område i kartan, med vit kant så att den syns mot alla färger
 farg_nedtonad    <- "#c6d4e1"      # områden utanför vald kommun
 farg_kommun      <- "#0f7090"
@@ -891,14 +891,24 @@ shinyServer(function(input, output, session) {
       varde <- if (nrow(nu) == 0) "Uppgift saknas" else
         kort_varde(nu$varde_lag, nu$varde_hog, nu$t_lag, nu$t_hog, nu$namnare, nu$kommentar)
 
-      # Förändring sedan första året, bara när båda värdena är exakta
+      # Förändring sedan första året, bara när båda värdena är exakta. Färgas rött om utvecklingen är
+      # ogynnsam och grönt om den är gynnsam (se shb_indikatorriktning). Mindre än 0,5 procentenheter
+      # räknas som oförändrat.
       exakta <- omrade %>% filter(!is.na(varde_lag), varde_lag == varde_hog)
-      forandring <- if (nrow(nu) == 1 && nu$ar %in% exakta$ar && min(exakta$ar) < ar_valt) {
+      forandring <- NULL
+      forandring_klass <- "kort-forandring"
+      if (nrow(nu) == 1 && nu$ar %in% exakta$ar && min(exakta$ar) < ar_valt) {
         forsta <- exakta %>% filter(ar == min(ar))
         diff <- round(nu$varde_lag - forsta$varde_lag, 1)
-        paste0(if (diff > 0) "+" else if (diff < 0) "−" else "±", formatera_tal(abs(diff)),
-               " procentenheter sedan ", forsta$ar)
+        forandring <- paste0(if (diff > 0) "▲ +" else if (diff < 0) "▼ −" else "±", formatera_tal(abs(diff)),
+                             " procentenheter sedan ", forsta$ar)
+        riktning <- indikatorer$riktning[k]
+        if (!is.na(riktning) && abs(diff) >= 0.5) {
+          ogynnsam <- (riktning == "negativ" && diff > 0) || (riktning == "positiv" && diff < 0)
+          forandring_klass <- paste("kort-forandring", if (ogynnsam) "kort-forandring--ogynnsam" else "kort-forandring--gynnsam")
+        }
       }
+      saknas <- varde %in% c("Visas inte", "Uppgift saknas")
 
       ref <- lapply(referenser, function(g) {
         r <- d %>% filter(geografi == g, ar == ar_valt)
@@ -910,8 +920,8 @@ shinyServer(function(input, output, session) {
 
       div(class = "indikatorkort",
           div(class = "kort-namn", if (namn_fran_rubrik) indikatorer$indikator_rubrik[k] else indikatorer$indikator_namn[k]),
-          div(class = "kort-varde", title = if (nrow(nu) == 1) nu$text, varde),
-          div(class = "kort-forandring", forandring),
+          div(class = paste("kort-varde", if (saknas) "kort-varde--saknas"), title = if (nrow(nu) == 1) nu$text, varde),
+          div(class = forandring_klass, forandring),
           div(class = "kort-referenser", ref),
           HTML(linjediagram_svg(omrade, d %>% filter(geografi == "Dalarna"), ar_valt, ar_min, ar_max, farg_vald, farg_lan)),
           div(class = "kort-axel", span(ar_min), span(ar_max)))

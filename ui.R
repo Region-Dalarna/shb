@@ -8,7 +8,8 @@ shinyUI(
       tags$title(APP_TITEL),
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),
       tags$link(rel = 'stylesheet', type = 'text/css', href = 'regiondalarna_ruf.css'),
-      tags$link(rel = 'stylesheet', type = 'text/css', href = 'app.css'),
+      # Versionsnummer efter filens ändringstid, så att webbläsaren hämtar ny css efter en uppdatering
+      tags$link(rel = 'stylesheet', type = 'text/css', href = paste0('app.css?v=', as.integer(file.mtime('www/app.css')))),
       rdshinyappar::telemetri_ui(telemetry),
 
       # fada in klick-hint-badgen först när respektive diagram renderats

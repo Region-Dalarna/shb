@@ -88,6 +88,7 @@
 .leaflet-interactive { cursor: pointer !important; }
 
 /* ---- Leaflet: z-index så tooltip ligger ovanför teckenförklaring ---- */
+/* Tooltiplagret flyttas ut ur kartlagret i js_karta (server.R) och kan då ligga över kontrollerna */
 .leaflet-pane.leaflet-map-pane { z-index: auto !important; }
 .leaflet-pane.leaflet-tooltip-pane { z-index: 1100 !important; }
 .leaflet-tooltip { z-index: 1100 !important; }

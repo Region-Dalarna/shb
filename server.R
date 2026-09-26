@@ -31,12 +31,29 @@ agarkategorier <- intersect(c("Totalt", "Allmännyttan", "Övriga ägare", "Uppg
 kommuner_utan_omraden <- setdiff(kommun_sf$kommunkod, shb_omraden_sf$kommunkod[!shb_omraden_sf$restyta])
 restytor <- shb_omraden_sf$omradeskod[shb_omraden_sf$restyta]
 
-# Reglage för hur mycket områdenas färg täcker bakgrundskartan. Läggs till direkt i webbläsaren, så att
-# clearControls() inte tar bort det när kartan ritas om, och ändrar färgerna utan att fråga servern.
-# Varje yta behåller sin grundtäckning i förhållande till de andra (restytor är svagare), och
-# täckningen sätts också på ytor som ritas senare och efter att muspekaren lämnat en yta.
-js_tackning <- "function(el, x) {
+# Körs i webbläsaren när kartan skapats:
+#
+# 1. Tooltips ovanpå teckenförklaringen. Leaflet lägger tooltips i kartlagret, som alltid hamnar under
+#    kartans kontroller oavsett z-index. Tooltiplagret flyttas därför ut ur kartlagret och får följa
+#    kartlagrets förflyttning när kartan panoreras och zoomas.
+#
+# 2. Reglage för hur mycket områdenas färg täcker bakgrundskartan. Läggs till direkt i webbläsaren, så att
+#    clearControls() inte tar bort det när kartan ritas om, och ändrar färgerna utan att fråga servern.
+#    Varje yta behåller sin grundtäckning i förhållande till de andra (restytor är svagare), och
+#    täckningen sätts också på ytor som ritas senare och efter att muspekaren lämnat en yta.
+js_karta <- "function(el, x) {
   var map = this, faktor = 1;
+
+  var kartlager = map.getPane('mapPane'), tooltiplager = map.getPane('tooltipPane');
+  map.getContainer().appendChild(tooltiplager);
+  var folj = function() {
+    tooltiplager.style.transform = kartlager.style.transform;
+    tooltiplager.style.left = kartlager.style.left;
+    tooltiplager.style.top = kartlager.style.top;
+  };
+  map.on('move zoom viewreset zoomend moveend resize', folj);
+  folj();
+
   var stil = function(l) {
     if (!l.setStyle || !l.options || l.options.fill === false || l.options.fillOpacity === undefined) return;
     if (l._grundtackning === undefined) {
@@ -244,7 +261,7 @@ shinyServer(function(input, output, session) {
           onClick = JS("function(btn, map){ Shiny.setInputValue('reset_map', true); }")
         )
       ) %>%
-      htmlwidgets::onRender(js_tackning)
+      htmlwidgets::onRender(js_karta)
   })
 
   observe({

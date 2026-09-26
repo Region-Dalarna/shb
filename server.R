@@ -58,7 +58,7 @@ shinyServer(function(input, output, session) {
   }
 
   listrutor <- list(indikator = c("val_indikator", "jmf_indikator"),
-                    agarkategori = c("val_agarkategori", "jmf_agarkategori"),
+                    agarkategori = c("val_agarkategori", "jmf_agarkategori", "prof_agarkategori"),
                     ar = c("val_ar", "jmf_ar"))
 
   for (id in listrutor$indikator) satt_listruta(id, isolate(valt$indikator), indikatorval)
@@ -625,21 +625,26 @@ shinyServer(function(input, output, session) {
     info <- jmf_info()
     enhet <- tolower(info$enhet)
 
+    df <- df %>% mutate(profil = sprintf('<a href="#" class="profil-lank" data-kod="%s">Profil</a>',
+                                         htmltools::htmlEscape(omradeskod, attribute = TRUE)))
+
     visning <- if (info$typ == "andel") {
       df %>% transmute(Kommun = kommunnamn, `Område` = omradesnamn, `Andel (%)` = varde,
                        !!paste0("Täljare (", enhet, ")") := taljare,
                        !!paste0("Nämnare (", enhet, ")") := namnare,
-                       Kommentar = kommentar)
+                       Kommentar = kommentar, ` ` = profil)
     } else {
-      df %>% transmute(Kommun = kommunnamn, `Område` = omradesnamn, !!paste0("Antal ", enhet) := varde)
+      df %>% transmute(Kommun = kommunnamn, `Område` = omradesnamn, !!paste0("Antal ", enhet) := varde, ` ` = profil)
     }
 
     tabell <- datatable(
       visning,
       rownames = FALSE,
+      escape = setdiff(names(visning), " "),                 # länken till områdesprofilen är HTML
       selection = "single",
       class = "compact stripe hover",
       options = list(pageLength = 15, lengthMenu = c(15, 50, 100), order = list(list(2, "desc")),
+                     columnDefs = list(list(orderable = FALSE, targets = ncol(visning) - 1)),
                      language = dt_svenska)
     )
 
@@ -657,6 +662,267 @@ shinyServer(function(input, output, session) {
     selectRows(dataTableProxy("tabell_omraden"), NULL)
     visa_i_kartan(kod)
   })
+
+  # ---- Fliken Områdesprofil ----
+  # Ett område, eller flera som räknas ihop, med alla indikatorer jämfört med kommunen, Dalarna och riket.
+  # Sammanräkningen och dess sekretessregler finns i R/profil.R.
+
+  alla_ar <- sort(unique(shb_statistik$ar), decreasing = TRUE)
+  updateSelectInput(session, "prof_ar", choices = alla_ar, selected = alla_ar[1])
+
+  # Områden grupperade per kommun, utan restytor
+  omradesval <- shb_omraden_sf %>%
+    st_drop_geometry() %>%
+    filter(!restyta) %>%
+    arrange(kommunnamn, omradesnamn)
+  omradesval <- lapply(split(setNames(omradesval$omradeskod, omradesval$omradesnamn), omradesval$kommunnamn), as.list)
+
+  # Profil som öppnas via länk, t.ex. ?flik=omradesprofil&omraden=2081_Tjärna%20Ängar|2081_Bullermyren
+  lank <- isolate(parseQueryString(session$clientData$url_search))
+  lank_omraden <- if (!is.null(lank$omraden)) intersect(strsplit(lank$omraden, "|", fixed = TRUE)[[1]], shb_omraden_sf$omradeskod)
+  updateSelectizeInput(session, "profil_omraden", choices = omradesval, selected = lank_omraden, server = FALSE)
+  if (identical(lank$flik, "omradesprofil")) {
+    updateTabsetPanel(session, "flikval", selected = "Områdesprofil")
+    if (!is.null(lank$agarkategori) && lank$agarkategori %in% agarkategorier) {
+      valt$agarkategori <- lank$agarkategori
+      for (id in listrutor$agarkategori) satt_listruta(id, lank$agarkategori)
+    }
+    if (!is.null(lank$ar) && lank$ar %in% alla_ar) updateSelectInput(session, "prof_ar", selected = lank$ar)
+  }
+
+  # Adressen följer profilen, så att den går att spara som bokmärke eller skicka som länk
+  observe({
+    koder <- input$profil_omraden
+    if (identical(input$flikval, "Områdesprofil") && length(koder) > 0) {
+      fraga <- paste0("?flik=omradesprofil&omraden=", URLencode(paste(koder, collapse = "|"), reserved = TRUE),
+                      if (!identical(valt$agarkategori, "Totalt")) paste0("&agarkategori=", URLencode(valt$agarkategori, reserved = TRUE)),
+                      if (isTruthy(input$prof_ar) && input$prof_ar != alla_ar[1]) paste0("&ar=", input$prof_ar))
+      updateQueryString(fraga, mode = "replace")
+    } else {
+      updateQueryString("?", mode = "replace")
+    }
+  })
+
+  # Öppna profilen för ett område från kartfliken eller tabellen i Jämför områden
+  ga_till_profil <- function(kod) {
+    updateSelectizeInput(session, "profil_omraden", selected = kod)
+    updateTabsetPanel(session, "flikval", selected = "Områdesprofil")
+  }
+  observe(shinyjs::toggleState("till_profil", condition = kartniva() == "omrade" && !is.null(valt_omrade())))
+  observeEvent(input$till_profil, { req(valt_omrade()); ga_till_profil(valt_omrade()) })
+  observeEvent(input$visa_profil, ga_till_profil(input$visa_profil))
+
+  profil_koder <- reactive({
+    validate(need(length(input$profil_omraden) > 0, "Välj ett eller flera områden ovan."))
+    input$profil_omraden
+  })
+
+  profil_kommuner <- reactive({
+    unique(shb_omraden_sf$kommunkod[shb_omraden_sf$omradeskod %in% profil_koder()])
+  })
+
+  # De valda områdena och jämförelserna i samma tabell: geografi, indikator, år och värden som intervall.
+  # Kommunen är med bara när alla valda områden ligger i samma kommun.
+  profil_data <- reactive({
+    koder <- profil_koder()
+    agar <- shb_statistik %>% filter(agarkategori == valt$agarkategori)
+
+    valda <- sla_ihop_omraden(agar, koder, shb_min_taljare) %>% mutate(geografi = "Valda områden", ordning = 1)
+    ref_koder <- c(if (length(profil_kommuner()) == 1) profil_kommuner(), "20", "00")
+    ref <- agar %>%
+      filter(regionkod %in% ref_koder) %>%
+      som_intervall(shb_min_taljare) %>%
+      mutate(geografi = geografinamn$namn[match(regionkod, geografinamn$regionkod)],
+             ordning = match(regionkod, ref_koder) + 1)
+
+    bind_rows(valda, ref) %>%
+      left_join(shb_indikatorer %>% select(indikator, indikator_rubrik), by = "indikator") %>%
+      mutate(
+        text = formatera_intervall(varde_lag, varde_hog, t_lag, t_hog, namnare, typ, enhet, kommentar),
+        mitt = (varde_lag + varde_hog) / 2,
+        ungefarlig = !is.na(varde_lag) & varde_lag != varde_hog
+      )
+  })
+
+  # Namnet på de valda områdena, t.ex. "Tjärna Ängar och Bullermyren"
+  profil_namn <- reactive({
+    namn <- shb_omraden_sf$omradesnamn[match(profil_koder(), shb_omraden_sf$omradeskod)]
+    n <- length(namn)
+    if (n == 1) namn
+    else if (n <= 3) paste0(paste(namn[-n], collapse = ", "), " och ", namn[n])
+    else paste0(paste(namn[1:2], collapse = ", "), " och ", n - 2, " områden till")
+  })
+
+  output$profil_rubrik <- renderUI({
+    koder <- input$profil_omraden
+    if (length(koder) == 0) {
+      return(div(class = "profil-tom", icon("hand-pointer"),
+                 " Välj ett område i listan ovan, eller flera som räknas ihop. Du kan också öppna ett område från kartan eller tabellen i Jämför områden."))
+    }
+    kommuner <- kommun_sf$kommunnamn[match(profil_kommuner(), kommun_sf$kommunkod)]
+    div(class = "profil-rubrik",
+        h3(profil_namn()),
+        p(paste0(if (length(koder) > 1) paste0(length(koder), " områden räknade ihop i ") else "",
+                 paste(kommuner, collapse = ", "),
+                 if (!identical(valt$agarkategori, "Totalt")) paste0(" · ", valt$agarkategori) else "",
+                 " · ", input$prof_ar,
+                 if (length(kommuner) > 1) " · Områdena ligger i olika kommuner, därför jämförs de inte med en kommun" else "")))
+  })
+
+  # Nyckeltal: befolkning, hushåll och barnfamiljer i de valda områdena
+  output$profil_nyckeltal <- renderUI({
+    req(length(input$profil_omraden) > 0, input$prof_ar)
+    df <- profil_data() %>%
+      filter(geografi == "Valda områden", ar == as.integer(input$prof_ar), typ == "antal") %>%
+      arrange(match(indikator, c("befolkning", "antal_hushall", "antal_barnfamiljer")))
+    if (nrow(df) == 0) return(NULL)
+    div(class = "nyckeltal",
+        lapply(seq_len(nrow(df)), function(i) {
+          varde <- if (is.na(df$varde_lag[i])) "Visas inte" else formatera_tal(df$t_lag[i])
+          div(class = "nyckeltal-ruta", title = df$text[i],
+              div(class = "nyckeltal-varde", varde),
+              div(class = "nyckeltal-etikett", df$indikator_namn[i]))
+        }))
+  })
+
+  # Färg och form per geografi i profildiagrammen: valda områden, kommunen (om den finns), Dalarna och riket
+  profil_skalor <- function(df) {
+    geo <- df %>% distinct(geografi, ordning) %>% arrange(ordning) %>% pull(geografi)
+    kommun <- setdiff(geo, c("Valda områden", "Dalarna", "Riket"))
+    farger <- c("Valda områden" = farg_vald, setNames(rep(farg_kommun, length(kommun)), kommun),
+                "Dalarna" = farg_lan, "Riket" = farg_riket)
+    former <- c("Valda områden" = 16, setNames(rep(124, length(kommun)), kommun), "Dalarna" = 18, "Riket" = 17)
+    list(farger = farger[geo], former = former[geo])
+  }
+
+  # Profildiagram: en rad per indikator, de valda områdena som punkt (med intervall om ungefärligt)
+  # och kommunen, Dalarna och riket som markeringar på samma rad
+  profildiagram <- function(output_id, grupp_urval, titel) {
+    req(input$prof_ar)
+    df <- profil_data() %>%
+      filter(grupp == grupp_urval, typ == "andel", ar == as.integer(input$prof_ar))
+    validate(need(nrow(df) > 0, "Inga data för valt urval"))
+
+    df <- df %>% mutate(rad = factor(str_wrap(indikator_namn, 32), levels = rev(unique(str_wrap(sort(indikator_namn), 32)))),
+                        etikett = paste0(geografi, "<br><b>", indikator_rubrik, "</b><br>", text))
+    valda <- df %>% filter(geografi == "Valda områden")
+    ref <- df %>% filter(geografi != "Valda områden", !is.na(mitt))
+    dolda <- valda %>% filter(is.na(mitt))
+    skalor <- profil_skalor(df)
+    storlek <- diagram_storlek(session, output_id)
+
+    p <- ggplot(mapping = aes(y = rad)) +
+      geom_point_interactive(data = ref, aes(x = mitt, color = geografi, shape = geografi, tooltip = etikett,
+                                             size = geografi %in% c("Dalarna", "Riket")), stroke = 1.2) +
+      scale_size_manual(values = c(`TRUE` = 3.2, `FALSE` = 7), guide = "none") +                 # kommunens streck större
+      geom_linerange(data = valda %>% filter(ungefarlig), aes(xmin = varde_lag, xmax = varde_hog), color = farg_vald,
+                     linewidth = 2.5, alpha = 0.35) +
+      geom_point_interactive(data = valda %>% filter(!is.na(mitt)),
+                             aes(x = mitt, color = geografi, shape = geografi, tooltip = etikett), size = 4) +
+      { if (nrow(dolda) > 0) geom_text_interactive(data = dolda, aes(x = 0, label = "Visas inte", tooltip = etikett),
+                                                   hjust = 0, size = 3.2, color = "#777") } +
+      scale_color_manual(values = skalor$farger, breaks = names(skalor$farger), name = NULL) +
+      scale_shape_manual(values = skalor$former, breaks = names(skalor$former), name = NULL) +
+      scale_x_continuous(labels = function(x) paste(formatera_tal(x), "%"), limits = c(0, NA),
+                         expand = expansion(mult = c(0.01, 0.05))) +
+      labs(x = NULL, y = NULL, title = radbryt(titel, storlek$width),
+           subtitle = if (any(valda$ungefarlig)) radbryt("Ljust fält: ungefärligt värde, där färre än 5 har eller saknar egenskapen.",
+                                                        storlek$width, storlek_pt = diagram_caption_storlek + 1, fet = FALSE),
+           caption = KALLA_TEXT) +
+      tema_diagram() +
+      theme(legend.position = "top", legend.justification = "left", panel.grid.major.y = element_line(color = "#e6e6e6"),
+            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
+
+    skapa_girafe(p, width = storlek$width, height = storlek$height)
+  }
+
+  output$profil_huvud <- renderGirafe(profildiagram("profil_huvud", "Huvudindikator", paste0("Huvudindikatorer, ", input$prof_ar)))
+  output$profil_bakgrund <- renderGirafe(profildiagram("profil_bakgrund", "Bakgrund", paste0("Bakgrundsvariabler, ", input$prof_ar)))
+
+  # Huvudsaklig inkomstkälla som staplade staplar. Varje del ritas med sitt lägsta säkra värde, och
+  # det som inte är känt (dolda och ungefärliga delar) visas grått som "Osäkert".
+  inkomstfarger <- c(ink_arbete = "#0f7090", ink_studier = "#54a1bd", ink_foraldraledighet_vard = "#8edded",
+                     ink_pension = "#93cec1", ink_sjukdom = "#f2c14e", ink_nedsatt_arbetsformaga = "#e8894a",
+                     ink_arbetsloshet = "#d95f5f", ink_ekonomiskt_bistand = "#a33b5e", ink_saknar_inkomst = "#5b3f7a",
+                     osakert = "#d9d9d9")
+
+  output$profil_inkomst <- renderGirafe({
+    req(input$prof_ar)
+    df <- profil_data() %>%
+      filter(startsWith(as.character(grupp), "Huvudsaklig inkomstkälla"), typ == "andel", ar == as.integer(input$prof_ar))
+    validate(need(nrow(df) > 0, "Inga data för valt urval"))
+
+    delar <- df %>%
+      mutate(andel = coalesce(varde_lag, 0), etikett = paste0(geografi, "<br><b>", indikator_namn, "</b><br>", text)) %>%
+      select(geografi, ordning, indikator, indikator_namn, andel, etikett)
+    osakert <- delar %>%
+      group_by(geografi, ordning) %>%
+      summarise(andel = max(100 - sum(andel), 0), .groups = "drop") %>%
+      filter(andel >= 0.05) %>%
+      mutate(indikator = "osakert", indikator_namn = "Osäkert (dolda eller ungefärliga värden)",
+             etikett = paste0(geografi, "<br>Osäkert: ", formatera_tal(round(andel, 1)), " %"))
+
+    namn <- c(setNames(shb_indikatorer$indikator_namn, shb_indikatorer$indikator), osakert = "Osäkert")
+    nivaer <- intersect(names(inkomstfarger), unique(c(delar$indikator, osakert$indikator)))
+    stapel <- bind_rows(delar, osakert) %>%
+      mutate(indikator = factor(indikator, levels = rev(nivaer)),
+             geografi = factor(geografi, levels = rev(unique(geografi[order(ordning)]))))
+    storlek <- diagram_storlek(session, "profil_inkomst")
+
+    p <- ggplot(stapel, aes(x = andel, y = geografi, fill = indikator)) +
+      geom_col_interactive(aes(tooltip = etikett, data_id = paste(geografi, indikator)), width = 0.7, color = "white", linewidth = 0.2) +
+      scale_fill_manual(values = inkomstfarger, labels = unname(namn[nivaer]), breaks = nivaer, name = NULL) +
+      scale_x_continuous(labels = function(x) paste(formatera_tal(x), "%"), expand = expansion(mult = c(0, 0.02))) +
+      labs(x = NULL, y = NULL, title = radbryt(paste0("Huvudsaklig inkomstkälla, 18–64 år, ", input$prof_ar), storlek$width),
+           caption = KALLA_TEXT) +
+      guides(fill = guide_legend(ncol = 2)) +
+      tema_diagram() +
+      theme(legend.position = "bottom", legend.text = element_text(size = diagram_caption_storlek),
+            legend.key.size = unit(0.35, "cm"), panel.grid.major.y = element_blank())
+
+    skapa_girafe(p, width = storlek$width, height = storlek$height)
+  })
+
+  # Utveckling över tid för huvudindikatorerna, ett litet diagram per indikator
+  output$profil_tid <- renderGirafe({
+    df <- profil_data() %>% filter(grupp == "Huvudindikator", typ == "andel", !is.na(mitt))
+    validate(need(nrow(df) > 0, "Inga data för valt urval"))
+
+    df <- df %>% mutate(etikett = paste0(geografi, " ", ar, "<br><b>", indikator_rubrik, "</b><br>", text),
+                        panel = str_wrap(indikator_namn, 28))
+    skalor <- profil_skalor(df)
+    storlek <- diagram_storlek(session, "profil_tid")
+    flera_ar <- n_distinct(df$ar) > 1
+
+    p <- ggplot(df, aes(x = ar, y = mitt, color = geografi, group = geografi)) +
+      { if (flera_ar) geom_line(linewidth = 0.9) } +
+      geom_linerange(data = df %>% filter(ungefarlig), aes(ymin = varde_lag, ymax = varde_hog), linewidth = 2.5, alpha = 0.35) +
+      geom_point_interactive(aes(tooltip = etikett, data_id = paste(geografi, indikator, ar)), size = 2) +
+      facet_wrap(~panel, nrow = 1, scales = "free_y") +
+      scale_color_manual(values = skalor$farger, breaks = names(skalor$farger), name = NULL) +
+      scale_x_continuous(breaks = function(x) seq(ceiling(x[1]), floor(x[2]), by = 1)) +
+      scale_y_continuous(labels = function(x) paste(formatera_tal(x), "%")) +
+      labs(x = NULL, y = NULL, title = radbryt("Huvudindikatorer över tid", storlek$width),
+           subtitle = if (!flera_ar) "Utvecklingen över tid syns när statistiken innehåller fler år.",
+           caption = KALLA_TEXT) +
+      tema_diagram() +
+      theme(legend.position = "top", legend.justification = "left", strip.text = element_text(size = diagram_caption_storlek + 1, face = "bold"),
+            plot.subtitle = element_text(size = diagram_caption_storlek + 1, color = "#444"))
+
+    skapa_girafe(p, width = storlek$width, height = storlek$height)
+  })
+
+  output$export_profil <- downloadHandler(
+    filename = function() "shb_omradesprofil.xlsx",
+    content = function(fil) {
+      profil_data() %>%
+        transmute(Geografi = if_else(geografi == "Valda områden", profil_namn(), geografi),
+                  `År` = ar, `Ägarkategori` = agarkategori, Grupp = as.character(grupp), Indikator = indikator_rubrik,
+                  `Värde` = text, `Lägsta värde` = varde_lag, `Högsta värde` = varde_hog) %>%
+        arrange(Grupp, Indikator, `År`, match(Geografi, unique(Geografi))) %>%
+        write_xlsx(fil)
+    }
+  )
 
   # ---- Nedladdning ----
   # Statistiken är redan sekretessgranskad när den läses in, släckta värden är tomma

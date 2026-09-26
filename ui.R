@@ -19,6 +19,25 @@ shinyUI(
         "      .find('.klick-hint').addClass('klick-hint--synlig');",
         "  }",
         "});"
+      )),
+      tags$script(HTML(
+        # Diagram i en hopfälld <details> är dolda för Shiny, visa dem när rutan fälls ut
+        "document.addEventListener('toggle', function(e) {",
+        "  if (e.target.tagName === 'DETAILS' && e.target.open) $(e.target).trigger('shown');",
+        "}, true);",
+        # Länken 'Profil' i tabellen: fånga klicket innan tabellen tolkar det som val av rad
+        "document.addEventListener('click', function(e) {",
+        "  var a = e.target.closest && e.target.closest('a.profil-lank');",
+        "  if (!a) return;",
+        "  e.preventDefault(); e.stopPropagation();",
+        "  Shiny.setInputValue('visa_profil', a.getAttribute('data-kod'), {priority: 'event'});",
+        "}, true);",
+        "function kopieraLank(knapp) {",
+        "  navigator.clipboard.writeText(window.location.href).then(function() {",
+        "    var text = knapp.querySelector('span'); var gammal = text.textContent;",
+        "    text.textContent = 'Kopierad!'; setTimeout(function() { text.textContent = gammal; }, 2000);",
+        "  });",
+        "}"
       ))
     ),
 
@@ -58,6 +77,8 @@ shinyUI(
                   div(class = "val-indikator", selectInput("val_indikator", "Indikator", choices = NULL)),
                   div(selectInput("val_agarkategori", "Ägarkategori", choices = NULL)),
                   div(class = "val-ar", selectInput("val_ar", "År", choices = NULL)),
+                  actionButton("till_profil", label = NULL, icon = icon("id-card"),
+                               class = "btn btn-light", title = "Visa områdesprofil för valt område"),
                   actionButton("geografi_tillbaka", label = NULL, icon = icon("level-up-alt"),
                                class = "btn btn-light", title = "Tillbaka till alla kommuner")
               ),
@@ -123,6 +144,33 @@ shinyUI(
           DTOutput("tabell_omraden")
         )
       ),
+      tabPanel('Områdesprofil',
+        div(class = "profil-layout",
+          div(class = "diagram-toolbar",
+              div(class = "val-omraden",
+                  selectizeInput("profil_omraden", "Områden – välj ett eller flera, de räknas ihop", choices = NULL,
+                                 multiple = TRUE, width = "100%",
+                                 options = list(placeholder = "Sök område eller kommun …", plugins = list("remove_button")))),
+              div(selectInput("prof_agarkategori", "Ägarkategori", choices = NULL)),
+              div(class = "val-ar", selectInput("prof_ar", "År", choices = NULL)),
+              # Kopieringen görs direkt i webbläsaren, eftersom urklipp bara får skrivas vid ett klick
+              tags$button(id = "kopiera_lank", type = "button", class = "btn btn-light", title = "Kopiera länk till profilen",
+                          onclick = "kopieraLank(this)", icon("link"), span("Kopiera länk")),
+              downloadButton("export_profil", "Excel", icon = icon("download"))
+          ),
+          uiOutput("profil_rubrik"),
+          uiOutput("profil_nyckeltal"),
+          fluidRow(
+            column(width = 7, div(class = "diagram-cell profil-cell", girafeOutput("profil_huvud", width = "100%", height = "100%"))),
+            column(width = 5, div(class = "diagram-cell profil-cell", girafeOutput("profil_inkomst", width = "100%", height = "100%")))
+          ),
+          div(class = "diagram-cell profil-tid", girafeOutput("profil_tid", width = "100%", height = "100%")),
+          tags$details(class = "profil-detaljer",
+            tags$summary("Bakgrundsvariabler"),
+            div(class = "diagram-cell profil-cell", girafeOutput("profil_bakgrund", width = "100%", height = "100%"))
+          )
+        )
+      ),
       tabPanel('Om',
         div(class = "om-text",
           h4('Om rapporten'),
@@ -160,6 +208,9 @@ shinyUI(
           h4('Så använder du rapporten'),
           tags$ul(
             tags$li('Fliken Karta och diagram visar en indikator i karta och diagram, från hela länet ned till enskilda områden.'),
+            tags$li('Fliken Områdesprofil visar ett område, eller flera områden som räknas ihop, med alla indikatorer jämfört
+                     med kommunen, Dalarna och riket. Adressen i webbläsaren uppdateras så att profilen går att spara som
+                     bokmärke eller skicka som länk.'),
             tags$li(paste0('Fliken Jämför områden visar de ', shb_antal_rangordning, ' områden i länet som har högst respektive
                      lägst värde, och en tabell med alla områden där du kan söka efter ett område.')),
             tags$li('Välj indikator, ägarkategori och år ovanför diagrammen. Ägarkategorin visar om det gäller alla bostäder
@@ -189,6 +240,9 @@ shinyUI(
           ),
           p(paste0('I små grupper kan en eller ett par personer påverka en andel mycket. Andelar som bygger på färre än ',
                    shb_min_rangordning, ' personer ingår därför inte när områdena rangordnas, men visas i kartan, diagrammen och tabellen.')),
+          p('När flera områden räknas ihop i områdesprofilen visas inte värdet om något av områdena har ett dolt värde, och
+             är något av värdena ungefärligt blir det sammanräknade värdet ett intervall. Annars skulle ett dolt värde gå att
+             räkna fram genom att jämföra olika urval av områden.'),
 
           h4('Kontakt'),
           p('Samhällsanalys, Region Dalarna, ',

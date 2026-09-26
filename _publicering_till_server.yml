@@ -13,4 +13,4 @@
 # För att permanent flytta appen till andra servern:
 #   shinyapp_flytta("appnamn")
 
-target: publik
+target: intern

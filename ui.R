@@ -1,6 +1,7 @@
 source('global.R')
 
 APP_TITEL <- 'Socialt hållbara bostadsområden'
+APP_BESKRIVNING <- 'Karta, diagram och områdesprofiler för socialt hållbara bostadsområden i Dalarna, med möjlighet att göra socioekonomiska analyser på bostadsområdesnivå, eller motsvarande nivå utanför tätorter.'
 
 shinyUI(
   fluidPage(

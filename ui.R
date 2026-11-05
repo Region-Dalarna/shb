@@ -5,6 +5,7 @@ APP_BESKRIVNING <- 'Karta, diagram och områdesprofiler för socialt hållbara b
 
 shinyUI(
   fluidPage(
+    title = APP_TITEL,  # webbläsarflikens rubrik
     tags$head(
       tags$title(APP_TITEL),
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),

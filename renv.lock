@@ -3002,11 +3002,11 @@
     },
     "rdshinyappar": {
       "Package": "rdshinyappar",
-      "Version": "0.0.0.9002",
+      "Version": "0.0.0.9004",
       "Source": "GitHub",
       "Title": "Runtime-hjälpare för Region Dalarnas Shiny-appar",
       "Authors@R": "c( person(\"Peter\", \"Möller\", , \"larspetermoller@gmail.com\", role = c(\"aut\", \"cre\")), person(\"Region Dalarna\", role = \"cph\") )",
-      "Description": "Hjälpfunktioner som Region Dalarnas Shiny-appar använder i drift: databasuppkopplingar (läs/skriv), lösenordshantering via .Renviron, tabellistning i PostGIS, EWKB-till-sf-konvertering och gemensam shiny.telemetry-loggning. Utbrutet ur func_shinyappar.R i Region-Dalarna/funktioner.",
+      "Description": "Hjälpfunktioner som Region Dalarnas Shiny-appar använder i drift: databasuppkopplingar (läs/skriv), lösenordshantering via .Renviron, tabellistning i PostGIS, EWKB-till-sf-konvertering, gemensam shiny.telemetry-loggning och en gratis bakgrundskarta för leaflet-kartor. Utbrutet ur func_shinyappar.R i Region-Dalarna/funktioner.",
       "License": "MIT + file LICENSE",
       "Encoding": "UTF-8",
       "Roxygen": "list(markdown = TRUE)",
@@ -3015,11 +3015,14 @@
       ],
       "Imports": [
         "DBI",
+        "htmltools",
+        "htmlwidgets",
         "jsonlite",
         "RPostgres",
         "stats"
       ],
       "Suggests": [
+        "leaflet",
         "sf",
         "shiny.telemetry",
         "testthat (>= 3.0.0)",
@@ -3032,12 +3035,12 @@
       "Author": "Peter Möller [aut, cre], Region Dalarna [cph]",
       "Maintainer": "Peter Möller <larspetermoller@gmail.com>",
       "RemoteType": "github",
-      "RemoteHost": "api.github.com",
       "RemoteUsername": "Region-Dalarna",
       "RemoteRepo": "rdpaket",
       "RemoteSubdir": "packages/rdshinyappar",
       "RemoteRef": "main",
-      "RemoteSha": "1e08c916d27c4eae7a43d925519f8155d1fe69ad"
+      "RemoteSha": "0d1baa756fdc2845cb4958018e508c1f353332a9",
+      "RemoteHost": "api.github.com"
     },
     "readr": {
       "Package": "readr",

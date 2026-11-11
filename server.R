@@ -253,7 +253,7 @@ shinyServer(function(input, output, session) {
   output$karta_shb <- renderLeaflet({
     bbox <- st_bbox(kommun_sf)
     leaflet() %>%
-      lagg_till_bakgrundskarta() %>%
+      lagg_till_bakgrundskarta(etikett_opacitet = 0.3) %>%
       fitBounds(bbox[["xmin"]], bbox[["ymin"]], bbox[["xmax"]], bbox[["ymax"]]) %>%
       addEasyButton(
         easyButton(

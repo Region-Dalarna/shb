@@ -3002,7 +3002,7 @@
     },
     "rdshinyappar": {
       "Package": "rdshinyappar",
-      "Version": "0.0.0.9004",
+      "Version": "0.0.0.9007",
       "Source": "GitHub",
       "Title": "Runtime-hjälpare för Region Dalarnas Shiny-appar",
       "Authors@R": "c( person(\"Peter\", \"Möller\", , \"larspetermoller@gmail.com\", role = c(\"aut\", \"cre\")), person(\"Region Dalarna\", role = \"cph\") )",
@@ -3039,7 +3039,7 @@
       "RemoteRepo": "rdpaket",
       "RemoteSubdir": "packages/rdshinyappar",
       "RemoteRef": "main",
-      "RemoteSha": "0d1baa756fdc2845cb4958018e508c1f353332a9",
+      "RemoteSha": "2fae632064afd93dcccfc7f5947154308756fca0",
       "RemoteHost": "api.github.com"
     },
     "readr": {

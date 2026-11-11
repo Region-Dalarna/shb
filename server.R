@@ -253,7 +253,7 @@ shinyServer(function(input, output, session) {
   output$karta_shb <- renderLeaflet({
     bbox <- st_bbox(kommun_sf)
     leaflet() %>%
-      addProviderTiles("OpenStreetMap.Mapnik", options = providerTileOptions(opacity = 0.45)) %>%
+      lagg_till_bakgrundskarta() %>%
       fitBounds(bbox[["xmin"]], bbox[["ymin"]], bbox[["xmax"]], bbox[["ymax"]]) %>%
       addEasyButton(
         easyButton(

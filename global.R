@@ -21,9 +21,9 @@ for (fil in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(fil, e
 
 telemetry <- skapa_telemetry("shb")
 
-# Allmänna options - TRUE = visa inte R-felmeddelanden i appen,
-# FALSE = visa felmeddelanden från R på webben
-options(shiny.sanitize.errors = FALSE)
+# Felmeddelanden: på servern visas inga R-fel för användaren (sanitize = TRUE); felet skrivs ändå till appens logg
+# (se Adminportalen, Driftstatus - Loggar). Lokalt i RStudio visas felen i klartext för att underlätta felsökning.
+options(shiny.sanitize.errors = !interactive())
 options(dplyr.summarise.inform = FALSE)
 
 # ---- 1. Inställningar ----
